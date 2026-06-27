@@ -13,8 +13,6 @@
 	symlinks = false
 [pull]
 	rebase = false
-[credential]
-	helper = manager
 [credential "https://dev.azure.com"]
 	useHttpPath = true
 [init]
