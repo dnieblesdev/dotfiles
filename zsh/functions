@@ -15,6 +15,28 @@ _fd_command() {
 # Project picker.
 # Uses $WORKSPACE plus fd/fdfind and fzf when available, then cd's into the
 # selected project. zoxide learns the directory naturally through its shell hook.
+dev() {
+    local base="${WORKSPACE:?WORKSPACE is not set. Configure it in wsl/env or linux/env}"
+
+    if [ -z "$1" ]; then
+        print -P "\033[36mProyectos disponibles:\033[0m"
+        find "$base" -maxdepth 1 -mindepth 1 -type d -printf "  → %f\n" | sort
+        return
+    fi
+
+    local project="$1"
+    local project_path="$base/$project"
+
+    if [ -d "$project_path" ]; then
+        cd "$project_path" || return
+        print -P "\033[32m→ $project\033[0m"
+    else
+        print -P "\033[31mProyecto '$project' no encontrado.\033[0m"
+        print -P "\033[36mProyectos disponibles:\033[0m"
+        find "$base" -maxdepth 1 -mindepth 1 -type d -printf "  → %f\n" | sort
+    fi
+}
+
 p() {
     local base="${WORKSPACE:-}"
     local fd_cmd selected

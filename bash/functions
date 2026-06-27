@@ -14,10 +14,10 @@ dev() {
     fi
 
     local project="$1"
-    local path="$base/$project"
+    local project_path="$base/$project"
 
-    if [ -d "$path" ]; then
-        cd "$path" || return
+    if [ -d "$project_path" ]; then
+        cd "$project_path" || return
         echo -e "\e[32m→ $project\e[0m"
     else
         echo -e "\e[31mProyecto '$project' no encontrado.\e[0m"
