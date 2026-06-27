@@ -47,6 +47,12 @@ link_file() {
 
     # Si es symlink pero apunta a otro lado → reemplazar
     if [ -L "$target" ]; then
+        if [ "$DRY_RUN" = true ]; then
+            dry "rm $target"
+            dry "ln -s $src $target"
+            return 0
+        fi
+
         rm "$target"
     fi
 
