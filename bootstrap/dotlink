@@ -91,7 +91,7 @@ link_module() {
                 ln -s "$dir" "$target_dir"
                 log "$rel_path → $target_dir"
             fi
-            ((count++))
+            count=$((count + 1))
         else
             # Ya existe — si no es symlink, linkear archivos internos uno por uno
             if [ ! -L "$target_dir" ]; then
@@ -159,9 +159,9 @@ list_status() {
             basename="$(basename "$file")"
             target="$HOME/$basename"
             if [ -L "$target" ] && [ "$(readlink "$target")" = "$file" ]; then
-                ((linked++))
+                linked=$((linked + 1))
             else
-                ((pending++))
+                pending=$((pending + 1))
             fi
         done < <(find "$DOTFILES/$module" -maxdepth 1 -name '.*' -type f -print0 2>/dev/null)
         echo "  $module: $linked linkeado(s), $pending pendiente(s)"
@@ -178,13 +178,13 @@ case "${1:-}" in
     --all)     set -- bash git env wsl linux ;;
 esac
 
-if [ $# -eq 0 ]; then
-    usage
-fi
-
 if [ "$LIST_MODE" = true ]; then
     list_status
     exit 0
+fi
+
+if [ $# -eq 0 ]; then
+    usage
 fi
 
 for module in "$@"; do
