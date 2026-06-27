@@ -1,0 +1,6 @@
+# ──────────────────────────────────────────────
+# Entorno específico de Linux nativo
+# ──────────────────────────────────────────────
+
+# WORKSPACE: ajustá esta ruta cuando montes el disco en Linux
+export WORKSPACE="/mnt/data/Vault/20_Desarrollo/20.10_Activos"

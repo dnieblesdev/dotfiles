@@ -1,0 +1,28 @@
+[credential "https://github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential
+[user]
+	name = dnieblesdev
+	email = dnieblesp@gmail.com
+[core]
+	autocrlf = true
+	fscache = true
+	symlinks = false
+[pull]
+	rebase = false
+[credential]
+	helper = manager
+[credential "https://dev.azure.com"]
+	useHttpPath = true
+[init]
+	defaultBranch = master
+[safe]
+	directory = /mnt/f/Vault/20_Desarrollo/20.10_Activos/charlybot
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true

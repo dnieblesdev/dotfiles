@@ -1,0 +1,15 @@
+# No trackear backups ni archivos temporales
+*.swp
+*.swo
+*~
+.DS_Store
+
+# No trackear el repo mismo
+repo/
+
+# No trackear archivos de OpenCode
+.atl/
+
+# No trackear posibles secretos
+*.env
+**/secrets/

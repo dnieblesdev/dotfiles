@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# install.sh — Bootstrap completo de dotfiles
+# Uso: curl -fsSL https://raw.githubusercontent.com/dnieblesdev/dotfiles/main/bootstrap/install.sh | bash
+# O local: ~/.dotfiles/bootstrap/install.sh
+
+set -euo pipefail
+
+DOTFILES_REPO="https://github.com/dnieblesdev/dotfiles.git"
+DOTFILES_DIR="$HOME/.dotfiles"
+BACKUP_DIR="$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S)"
+
+# ── Utils ──
+info()  { echo -e "  \033[36m→\033[0m $1"; }
+ok()    { echo -e "  \033[32m✓\033[0m $1"; }
+warn()  { echo -e "  \033[33m⚠\033[0m $1"; }
+err()   { echo -e "  \033[31m✗\033[0m $1"; }
+
+# Detectar SO
+is_wsl()     { grep -qi microsoft /proc/version 2>/dev/null; }
+is_linux()   { [ "$(uname)" = "Linux" ] && ! is_wsl; }
+
+echo ""
+echo -e "\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[1m  Dotfiles Bootstrap\033[0m"
+echo -e "\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+
+# ── 1. Paquetes base del sistema ──
+echo -e "\033[1m[1/5] Paquetes del sistema\033[0m"
+
+if is_linux || is_wsl; then
+    if command -v apt &>/dev/null; then
+        info "Actualizando apt..."
+        sudo apt update -qq
+        sudo apt install -y -qq git curl unzip build-essential 2>/dev/null
+        ok "Paquetes base instalados"
+    else
+        warn "No se detectó apt. Instalá git, curl y unzip manualmente."
+    fi
+fi
+
+# ── 2. Clonar dotfiles ──
+echo ""
+echo -e "\033[1m[2/5] Clonando dotfiles\033[0m"
+
+if [ -d "$DOTFILES_DIR" ]; then
+    info "~/.dotfiles/ ya existe. Actualizando..."
+    git -C "$DOTFILES_DIR" pull --ff-only 2>/dev/null || warn "No se pudo actualizar (cambios locales?)"
+else
+    git clone "$DOTFILES_REPO" "$DOTFILES_DIR"
+    ok "Clonado en $DOTFILES_DIR"
+fi
+
+# ── 3. Backup de dotfiles existentes ──
+echo ""
+echo -e "\033[1m[3/5] Backup de config actual\033[0m"
+
+NEEDS_BACKUP=false
+for f in .bashrc .profile .gitconfig; do
+    if [ -f "$HOME/$f" ] && [ ! -L "$HOME/$f" ]; then
+        NEEDS_BACKUP=true
+        break
+    fi
+done
+
+if [ "$NEEDS_BACKUP" = true ]; then
+    mkdir -p "$BACKUP_DIR"
+    for f in .bashrc .profile .gitconfig; do
+        if [ -f "$HOME/$f" ] && [ ! -L "$HOME/$f" ]; then
+            cp "$HOME/$f" "$BACKUP_DIR/$f"
+            info "Respaldado $HOME/$f → $BACKUP_DIR/$f"
+        fi
+    done
+    ok "Backup en $BACKUP_DIR"
+else
+    info "No hay archivos originales que respaldar (ya son symlinks o no existen)"
+fi
+
+# ── 4. Linkear dotfiles ──
+echo ""
+echo -e "\033[1m[4/5] Instalando dotfiles\033[0m"
+
+chmod +x "$DOTFILES_DIR/bootstrap/dotlink"
+"$DOTFILES_DIR/bootstrap/dotlink" bash git
+
+if is_wsl; then
+    "$DOTFILES_DIR/bootstrap/dotlink" wsl
+elif is_linux; then
+    "$DOTFILES_DIR/bootstrap/dotlink" linux
+fi
+
+ok "Dotfiles instalados"
+
+# ── 5. Runtimes opcionales ──
+echo ""
+echo -e "\033[1m[5/5] Runtimes\033[0m"
+
+# NVM
+if [ ! -d "$HOME/.nvm" ]; then
+    info "Instalando nvm..."
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+    ok "nvm instalado"
+else
+    info "nvm ya instalado"
+fi
+
+# Rust
+if ! command -v rustc &>/dev/null; then
+    info "Instalando Rust..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>/dev/null
+    ok "Rust instalado"
+else
+    info "Rust ya instalado"
+fi
+
+# Flutter (solo instrucción)
+if [ ! -d "$HOME/development/flutter" ]; then
+    warn "Flutter no detectado. Si lo necesitás: https://docs.flutter.dev/get-started/install/linux"
+fi
+
+# ── Fin ──
+echo ""
+echo -e "\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo -e "\033[1m  ✅ Bootstrap completado\033[0m"
+echo -e "\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+echo ""
+echo "  Cerra y abrí la terminal para que los cambios surtan efecto."
+echo "  Si algo no funciona, corré: dotlink --list"
+echo ""

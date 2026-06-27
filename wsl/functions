@@ -1,0 +1,6 @@
+# ──────────────────────────────────────────────
+# Funciones específicas de WSL
+# ──────────────────────────────────────────────
+
+# (Acá van funciones que solo tienen sentido en WSL)
+# Por ejemplo: acceso a Windows paths, interop, etc.

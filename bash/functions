@@ -1,0 +1,39 @@
+# ──────────────────────────────────────────────
+# Funciones de utilidad
+# ──────────────────────────────────────────────
+
+# Navegador de proyectos
+# Usa $WORKSPACE definido en wsl/env o linux/env
+dev() {
+    local base="${WORKSPACE:?Variable WORKSPACE no definida — configurala en wsl/env o linux/env}"
+
+    if [ -z "$1" ]; then
+        echo -e "\e[36mProyectos disponibles:\e[0m"
+        find "$base" -maxdepth 1 -mindepth 1 -type d -printf "  → %f\n" | sort
+        return
+    fi
+
+    local project="$1"
+    local path="$base/$project"
+
+    if [ -d "$path" ]; then
+        cd "$path" || return
+        echo -e "\e[32m→ $project\e[0m"
+    else
+        echo -e "\e[31mProyecto '$project' no encontrado.\e[0m"
+        echo -e "\e[36mProyectos disponibles:\e[0m"
+        find "$base" -maxdepth 1 -mindepth 1 -type d -printf "  → %f\n" | sort
+    fi
+}
+
+# Autocompletado para dev()
+_dev_complete() {
+    local base="${WORKSPACE:?}"
+    local current="${COMP_WORDS[COMP_CWORD]}"
+
+    COMPREPLY=(
+        $(compgen -W "$(find "$base" -maxdepth 1 -mindepth 1 -type d -printf "%f\n")" -- "$current")
+    )
+}
+
+complete -F _dev_complete dev

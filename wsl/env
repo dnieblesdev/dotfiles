@@ -1,0 +1,6 @@
+# ──────────────────────────────────────────────
+# Entorno específico de WSL
+# ──────────────────────────────────────────────
+
+# WORKSPACE: ruta a tus proyectos activos en NTFS
+export WORKSPACE="/mnt/f/Vault/20_Desarrollo/20.10_Activos"

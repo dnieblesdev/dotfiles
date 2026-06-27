@@ -1,0 +1,19 @@
+# ──────────────────────────────────────────────
+# Configuración del shell
+# ──────────────────────────────────────────────
+
+# No duplicar líneas ni líneas que empiezan con espacio en el history
+HISTCONTROL=ignoreboth
+
+# Append al history, no sobrescribir
+shopt -s histappend
+
+# Límites del history
+HISTSIZE=1000
+HISTFILESIZE=2000
+
+# Actualizar tamaño de ventana después de cada comando
+shopt -s checkwinsize
+
+# Habilitar ** para rutas (descomentar si se necesita)
+# shopt -s globstar
