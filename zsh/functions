@@ -1,0 +1,47 @@
+# ──────────────────────────────────────────────
+# Zsh helper functions
+# ──────────────────────────────────────────────
+
+_fd_command() {
+    if command -v fd >/dev/null 2>&1; then
+        printf '%s\n' fd
+    elif command -v fdfind >/dev/null 2>&1; then
+        printf '%s\n' fdfind
+    else
+        return 1
+    fi
+}
+
+# Project picker.
+# Uses $WORKSPACE plus fd/fdfind and fzf when available, then cd's into the
+# selected project. zoxide learns the directory naturally through its shell hook.
+p() {
+    local base="${WORKSPACE:-}"
+    local fd_cmd selected
+
+    if [ -z "$base" ]; then
+        print -u2 "WORKSPACE is not set. Configure it in wsl/env or linux/env."
+        return 1
+    fi
+
+    if [ ! -d "$base" ]; then
+        print -u2 "WORKSPACE does not exist: $base"
+        return 1
+    fi
+
+    if ! command -v fzf >/dev/null 2>&1; then
+        print -u2 "fzf is not installed. Install it to use p()."
+        return 1
+    fi
+
+    fd_cmd="$(_fd_command)" || {
+        print -u2 "fd/fdfind is not installed. Install fd-find to use p()."
+        return 1
+    }
+
+    selected="$($fd_cmd --type d --max-depth 1 --min-depth 1 . "$base" 2>/dev/null | sort | fzf --prompt='project> ')"
+
+    if [ -n "$selected" ]; then
+        cd "$selected" || return
+    fi
+}

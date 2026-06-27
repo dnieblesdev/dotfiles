@@ -15,6 +15,63 @@ ok()    { echo -e "  \033[32m✓\033[0m $1"; }
 warn()  { echo -e "  \033[33m⚠\033[0m $1"; }
 err()   { echo -e "  \033[31m✗\033[0m $1"; }
 
+apt_install_required() {
+    sudo apt install -y -qq "$@"
+}
+
+apt_install_optional() {
+    local pkg
+    for pkg in "$@"; do
+        if dpkg -s "$pkg" >/dev/null 2>&1; then
+            info "$pkg ya instalado"
+            continue
+        fi
+
+        info "Instalando $pkg..."
+        if sudo apt install -y -qq "$pkg" >/dev/null 2>&1; then
+            ok "$pkg instalado"
+        else
+            warn "No se pudo instalar $pkg desde apt. Continuando."
+        fi
+    done
+}
+
+install_starship_best_effort() {
+    if command -v starship >/dev/null 2>&1; then
+        info "starship ya instalado"
+        return 0
+    fi
+
+    if command -v apt >/dev/null 2>&1 && apt-cache show starship >/dev/null 2>&1; then
+        info "Instalando starship desde apt..."
+        sudo apt install -y -qq starship >/dev/null 2>&1 || warn "No se pudo instalar starship desde apt."
+    fi
+
+    if ! command -v starship >/dev/null 2>&1; then
+        info "Instalando starship con el instalador oficial..."
+        if curl -fsSL https://starship.rs/install.sh | sh -s -- -y >/dev/null 2>&1; then
+            ok "starship instalado"
+        else
+            warn "No se pudo instalar starship. Podés instalarlo manualmente luego."
+        fi
+    fi
+}
+
+install_tldr_best_effort() {
+    if command -v tldr >/dev/null 2>&1 || command -v tealdeer >/dev/null 2>&1; then
+        info "tldr/tealdeer ya instalado"
+        return 0
+    fi
+
+    if sudo apt install -y -qq tldr >/dev/null 2>&1; then
+        ok "tldr instalado"
+    elif sudo apt install -y -qq tealdeer >/dev/null 2>&1; then
+        ok "tealdeer instalado"
+    else
+        warn "No se pudo instalar tldr ni tealdeer desde apt. Continuando."
+    fi
+}
+
 # Detectar SO
 is_wsl()     { grep -qi microsoft /proc/version 2>/dev/null; }
 is_linux()   { [ "$(uname)" = "Linux" ] && ! is_wsl; }
@@ -32,10 +89,23 @@ if is_linux || is_wsl; then
     if command -v apt &>/dev/null; then
         info "Actualizando apt..."
         sudo apt update -qq
-        sudo apt install -y -qq git curl unzip build-essential 2>/dev/null
+        apt_install_required git curl unzip build-essential
         ok "Paquetes base instalados"
+
+        info "Instalando herramientas interactivas de terminal..."
+        apt_install_optional zsh fzf bat ripgrep fd-find zoxide eza
+        install_tldr_best_effort
+        install_starship_best_effort
+
+        if command -v batcat >/dev/null 2>&1 && ! command -v bat >/dev/null 2>&1; then
+            info "Ubuntu expone bat como batcat; los aliases de Zsh lo manejan."
+        fi
+
+        if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
+            info "Ubuntu expone fd como fdfind; los aliases y p() lo manejan."
+        fi
     else
-        warn "No se detectó apt. Instalá git, curl y unzip manualmente."
+        warn "No se detectó apt. Instalá git, curl, unzip, zsh, starship, zoxide, fzf, bat, eza, ripgrep, fd y tldr manualmente."
     fi
 fi
 
@@ -56,7 +126,7 @@ echo ""
 echo -e "\033[1m[3/5] Backup de config actual\033[0m"
 
 NEEDS_BACKUP=false
-for f in .bashrc .profile .gitconfig; do
+for f in .bashrc .zshrc .profile .gitconfig; do
     if [ -f "$HOME/$f" ] && [ ! -L "$HOME/$f" ]; then
         NEEDS_BACKUP=true
         break
@@ -65,7 +135,7 @@ done
 
 if [ "$NEEDS_BACKUP" = true ]; then
     mkdir -p "$BACKUP_DIR"
-    for f in .bashrc .profile .gitconfig; do
+    for f in .bashrc .zshrc .profile .gitconfig; do
         if [ -f "$HOME/$f" ] && [ ! -L "$HOME/$f" ]; then
             cp "$HOME/$f" "$BACKUP_DIR/$f"
             info "Respaldado $HOME/$f → $BACKUP_DIR/$f"
@@ -81,7 +151,7 @@ echo ""
 echo -e "\033[1m[4/5] Instalando dotfiles\033[0m"
 
 chmod +x "$DOTFILES_DIR/bootstrap/dotlink"
-"$DOTFILES_DIR/bootstrap/dotlink" bash git
+"$DOTFILES_DIR/bootstrap/dotlink" bash git zsh config
 
 if is_wsl; then
     "$DOTFILES_DIR/bootstrap/dotlink" wsl
@@ -125,5 +195,7 @@ echo -e "\033[1m  ✅ Bootstrap completado\033[0m"
 echo -e "\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo ""
 echo "  Cerra y abrí la terminal para que los cambios surtan efecto."
+echo "  Para usar Zsh como shell por defecto, revisá primero: chsh -s \"$(command -v zsh || echo /usr/bin/zsh)\""
+echo "  El bootstrap NO cambia tu shell automáticamente."
 echo "  Si algo no funciona, corré: dotlink --list"
 echo ""

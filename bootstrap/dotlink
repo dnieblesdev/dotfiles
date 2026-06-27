@@ -5,7 +5,7 @@
 # Uso:
 #   dotlink bash              # linkea ~/.dotfiles/bash/* → ~/
 #   dotlink git env           # linkea git y env
-#   dotlink --all             # linkea todos los módulos
+#   dotlink --all             # linkea todos los módulos principales
 #   dotlink --list            # muestra qué está linkeado y qué no
 #   dotlink --dry-run bash    # muestra qué haría sin ejecutar
 #   dotlink --delete bash     # remueve symlinks de bash
@@ -175,7 +175,7 @@ case "${1:-}" in
     --list)    LIST_MODE=true ; shift ;;
     --dry-run) DRY_RUN=true ; shift ;;
     --delete)  DELETE_MODE=true ; shift ;;
-    --all)     set -- bash git env wsl linux ;;
+    --all)     set -- bash git zsh config env wsl linux ;;
 esac
 
 if [ "$LIST_MODE" = true ]; then

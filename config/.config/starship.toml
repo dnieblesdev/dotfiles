@@ -1,0 +1,37 @@
+add_newline = true
+
+format = "$directory$git_branch$git_status$nodejs$rust$golang$python$character"
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+
+[directory]
+style = "bold cyan"
+truncation_length = 3
+truncate_to_repo = true
+
+[git_branch]
+symbol = "git:"
+style = "bold purple"
+format = "[$symbol$branch]($style) "
+
+[git_status]
+style = "bold yellow"
+format = "[$all_status$ahead_behind]($style) "
+
+[nodejs]
+symbol = "node:"
+format = "[$symbol($version)](bold green) "
+
+[rust]
+symbol = "rust:"
+format = "[$symbol($version)](bold red) "
+
+[golang]
+symbol = "go:"
+format = "[$symbol($version)](bold cyan) "
+
+[python]
+symbol = "py:"
+format = "[$symbol($version)](bold yellow) "
