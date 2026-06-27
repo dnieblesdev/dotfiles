@@ -59,6 +59,27 @@ link_file() {
     log "$name → $target"
 }
 
+ensure_real_dir() {
+    local dir="$1"
+
+    if [ -d "$dir" ] && [ ! -L "$dir" ]; then
+        return 0
+    fi
+
+    if [ -e "$dir" ] || [ -L "$dir" ]; then
+        warn "$dir existe pero NO es un directorio real. Movélo o borralo manual."
+        return 1
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+        dry "mkdir -p $dir"
+        return 0
+    fi
+
+    mkdir -p "$dir"
+    log "Creado $dir"
+}
+
 link_module() {
     local module="$1"
     local src_dir="$DOTFILES/$module"
@@ -77,32 +98,20 @@ link_module() {
         link_file "$file" "$HOME/$basename" && ((count++)) || true
     done < <(find "$src_dir" -maxdepth 1 -name '.*' -type f -print0 2>/dev/null)
 
-    # Linkear dotfiles en subdirectorios de $HOME (ej: .config/foo)
-    # Busca carpetas como .config/, .local/share/ dentro del módulo
+    # Linkear contenido de directorios dot anidados (ej: .config/starship.toml)
+    # El directorio padre en $HOME se crea como directorio real; nunca se symlinkea completo.
     while IFS= read -r -d '' dir; do
         local rel_path="${dir#$src_dir/}"   # ej: .config/gh
         local target_dir="$HOME/$rel_path"
 
-        if [ ! -d "$target_dir" ]; then
-            # No existe → crear symlink a la carpeta entera
-            if [ "$DRY_RUN" = true ]; then
-                dry "ln -s $dir $target_dir"
-            else
-                ln -s "$dir" "$target_dir"
-                log "$rel_path → $target_dir"
-            fi
-            count=$((count + 1))
-        else
-            # Ya existe — si no es symlink, linkear archivos internos uno por uno
-            if [ ! -L "$target_dir" ]; then
-                while IFS= read -r -d '' inner; do
-                    local inner_name
-                    inner_name="$(basename "$inner")"
-                    link_file "$inner" "$target_dir/$inner_name" && ((count++)) || true
-                done < <(find "$dir" -maxdepth 1 -type f -print0 2>/dev/null)
-            fi
+        if ensure_real_dir "$target_dir"; then
+            while IFS= read -r -d '' inner; do
+                local inner_name
+                inner_name="$(basename "$inner")"
+                link_file "$inner" "$target_dir/$inner_name" && ((count++)) || true
+            done < <(find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2>/dev/null)
         fi
-    done < <(find "$src_dir" -mindepth 1 -type d -name '.*' -print0 2>/dev/null)
+    done < <(find "$src_dir" -mindepth 1 -maxdepth 1 -type d -name '.*' -print0 2>/dev/null)
 
     if [ "$count" -eq 0 ]; then
         info "Nada nuevo que linkear en '$module'"
@@ -129,16 +138,21 @@ delete_module() {
         fi
     done < <(find "$src_dir" -maxdepth 1 -name '.*' -type f -print0 2>/dev/null)
 
-    # Remover symlinks de subdirectorios
+    # Remover symlinks dentro de directorios dot anidados, sin borrar el directorio padre real.
     while IFS= read -r -d '' dir; do
         local rel_path target_dir
         rel_path="${dir#$src_dir/}"
         target_dir="$HOME/$rel_path"
-        if [ -L "$target_dir" ]; then
-            rm "$target_dir"
-            log "Removido $target_dir"
-        fi
-    done < <(find "$src_dir" -mindepth 1 -type d -name '.*' -print0 2>/dev/null)
+        while IFS= read -r -d '' inner; do
+            local inner_name target
+            inner_name="$(basename "$inner")"
+            target="$target_dir/$inner_name"
+            if [ -L "$target" ] && [ "$(readlink "$target")" = "$inner" ]; then
+                rm "$target"
+                log "Removido $target"
+            fi
+        done < <(find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2>/dev/null)
+    done < <(find "$src_dir" -mindepth 1 -maxdepth 1 -type d -name '.*' -print0 2>/dev/null)
 }
 
 list_status() {
@@ -164,6 +178,21 @@ list_status() {
                 pending=$((pending + 1))
             fi
         done < <(find "$DOTFILES/$module" -maxdepth 1 -name '.*' -type f -print0 2>/dev/null)
+        while IFS= read -r -d '' dir; do
+            local rel_path target_dir
+            rel_path="${dir#$DOTFILES/$module/}"
+            target_dir="$HOME/$rel_path"
+            while IFS= read -r -d '' inner; do
+                local inner_name target
+                inner_name="$(basename "$inner")"
+                target="$target_dir/$inner_name"
+                if [ -L "$target" ] && [ "$(readlink "$target")" = "$inner" ]; then
+                    linked=$((linked + 1))
+                else
+                    pending=$((pending + 1))
+                fi
+            done < <(find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -print0 2>/dev/null)
+        done < <(find "$DOTFILES/$module" -mindepth 1 -maxdepth 1 -type d -name '.*' -print0 2>/dev/null)
         echo "  $module: $linked linkeado(s), $pending pendiente(s)"
     done
 }

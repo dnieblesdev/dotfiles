@@ -63,7 +63,7 @@ Useful commands:
 ~/.dotfiles/bootstrap/dotlink --delete bash
 ```
 
-`dotlink` also supports nested dot directories such as `.config/`, so `config/.config/starship.toml` links to `~/.config/starship.toml`.
+`dotlink` also supports nested dot directories such as `.config/`. It creates the parent directory in `$HOME` as a real directory, then links children individually, so `config/.config/starship.toml` links to `~/.config/starship.toml` without symlinking the whole `~/.config` directory.
 
 ## Zsh interactive layer
 
