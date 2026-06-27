@@ -2,20 +2,25 @@
 # PATH y variables de entorno de herramientas
 # ──────────────────────────────────────────────
 
-# opencode
-export PATH=/home/dniebles/.opencode/bin:$PATH
+# Helpers shared by Bash and Zsh.
+[ -f "$HOME/.dotfiles/env/path.sh" ] && . "$HOME/.dotfiles/env/path.sh"
 
-# gentle-ai
-export PATH="$PATH:/home/dniebles/.local/bin"
-
-# Flutter
-export PATH="/home/dniebles/development/flutter/bin:$PATH"
+# Rust / Cargo
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
 # Java / Android SDK
 export JAVA_HOME="/home/dniebles/development/jdk"
 export ANDROID_HOME="/home/dniebles/Android/Sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+path_prepend "$ANDROID_HOME/platform-tools"
+path_prepend "$ANDROID_HOME/cmdline-tools/latest/bin"
+path_prepend "$JAVA_HOME/bin"
 
-# Rust / Cargo
-[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+# Flutter
+path_prepend "/home/dniebles/development/flutter/bin"
+
+# opencode
+path_prepend "/home/dniebles/.opencode/bin"
+
+# gentle-ai
+path_append "/home/dniebles/.local/bin"
