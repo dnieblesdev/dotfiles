@@ -32,6 +32,19 @@ Or run the full bootstrap:
 ~/.dotfiles/bootstrap/install.sh
 ```
 
+## Bootstrap order
+
+The bootstrap now follows a strict split:
+
+1. System packages from the distro package manager only (`apt` or `pacman`): `git`, `curl`, `wget`, `openssh`, build tools, `unzip`, and `tar`
+2. Homebrew bootstrap with explicit detection, install, verification, and `brew shellenv`
+3. Brew-managed developer tools for Linux/WSL: `eza`, `bat`, `fd`, `ripgrep`, `fzf`, `zoxide`, `starship`, `neovim`, `lazygit`, `bottom`, `dua`, and `tldr`
+4. Runtime managers kept separate from Brew: `nvm`, `uv`, and `rustup`
+
+If Homebrew is missing or fails to install, the bootstrap warns clearly and skips only the brew-managed layer.
+
+Install `zsh` separately if your distro does not already provide it.
+
 ## Structure
 
 | Path | Purpose |
@@ -69,9 +82,8 @@ Useful commands:
 
 The Zsh layer is intentionally small and transparent. It does not use Oh My Zsh.
 
-It expects or installs these tools when available:
+The bootstrap installs the common interactive tools via Homebrew when available:
 
-- `zsh`
 - `starship`
 - `zoxide`
 - `fzf`
@@ -79,7 +91,13 @@ It expects or installs these tools when available:
 - `eza`
 - `ripgrep`
 - `fd` / `fdfind`
-- `tldr` or `tealdeer`
+- `tldr` via `tealdeer`
+
+Runtime managers stay separate from Brew:
+
+- `nvm`
+- `uv`
+- `rustup`
 
 Install and link everything with the bootstrap:
 
