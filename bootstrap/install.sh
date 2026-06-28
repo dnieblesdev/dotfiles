@@ -6,8 +6,8 @@ DOTFILES_REPO="https://github.com/dnieblesdev/dotfiles.git"
 DOTFILES_DIR="$HOME/.dotfiles"
 BACKUP_DIR="$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S)"
 
-APT_PACKAGES=(git curl wget openssh-client build-essential unzip tar)
-PACMAN_PACKAGES=(git curl wget openssh base-devel unzip tar)
+APT_PACKAGES=(git curl wget openssh-client build-essential unzip tar file procps)
+PACMAN_PACKAGES=(git curl wget openssh base-devel unzip tar file procps-ng)
 BREW_TOOL_SPECS=(
     "eza|eza"
     "bat|bat"
@@ -104,7 +104,7 @@ install_system_packages() {
             ;;
         pacman)
             info "Installing system packages with pacman"
-            if run_privileged pacman -Sy --noconfirm --needed "${PACMAN_PACKAGES[@]}"; then
+            if run_privileged pacman -Syu --noconfirm --needed "${PACMAN_PACKAGES[@]}"; then
                 ok "System packages installed"
             else
                 warn "Some pacman packages could not be installed. Continuing with what is already available."
