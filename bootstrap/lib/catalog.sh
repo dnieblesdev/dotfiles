@@ -7,7 +7,7 @@ BOOTSTRAP_CATALOG_VERSION=1
 
 BOOTSTRAP_ACTION_ORDER=(
     system-packages
-    homebrew
+    homebrew-bootstrap
     brew-tools
     dotfiles-clone
     dotfiles-backup
@@ -19,7 +19,7 @@ BOOTSTRAP_ACTION_ORDER=(
 
 declare -A BOOTSTRAP_ACTION_LABELS=(
     [system-packages]="Distro system packages"
-    [homebrew]="Homebrew bootstrap"
+    [homebrew-bootstrap]="Homebrew bootstrap"
     [brew-tools]="Brew-managed developer tools"
     [dotfiles-clone]="Clone or update dotfiles repo"
     [dotfiles-backup]="Back up existing shell files"
@@ -31,7 +31,7 @@ declare -A BOOTSTRAP_ACTION_LABELS=(
 
 declare -A BOOTSTRAP_ACTION_GROUPS=(
     [system-packages]="system"
-    [homebrew]="brew"
+    [homebrew-bootstrap]="brew"
     [brew-tools]="brew"
     [dotfiles-clone]="dotfiles"
     [dotfiles-backup]="dotfiles"
@@ -43,8 +43,8 @@ declare -A BOOTSTRAP_ACTION_GROUPS=(
 
 declare -A BOOTSTRAP_ACTION_DEPS=(
     [system-packages]=""
-    [homebrew]="system-packages"
-    [brew-tools]="homebrew"
+    [homebrew-bootstrap]="system-packages"
+    [brew-tools]="homebrew-bootstrap"
     [dotfiles-clone]="system-packages"
     [dotfiles-backup]="dotfiles-clone"
     [dotfiles-link]="dotfiles-clone dotfiles-backup"
@@ -53,11 +53,31 @@ declare -A BOOTSTRAP_ACTION_DEPS=(
     [runtime-rustup]="system-packages"
 )
 
+declare -A BOOTSTRAP_ACTION_PRIVILEGES=(
+    [system-packages]="elevated"
+    [homebrew-bootstrap]="mixed"
+    [brew-tools]="user"
+    [dotfiles-clone]="user"
+    [dotfiles-backup]="user"
+    [dotfiles-link]="user"
+    [runtime-nvm]="user"
+    [runtime-uv]="user"
+    [runtime-rustup]="user"
+)
+
+bootstrap_action_normalize() {
+    case "$1" in
+        homebrew) printf '%s\n' homebrew-bootstrap ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 bootstrap_action_known() {
     local action="$1"
+    action="$(bootstrap_action_normalize "$action")"
 
     case "$action" in
-        system-packages|homebrew|brew-tools|dotfiles-clone|dotfiles-backup|dotfiles-link|runtime-nvm|runtime-uv|runtime-rustup)
+        system-packages|homebrew-bootstrap|brew-tools|dotfiles-clone|dotfiles-backup|dotfiles-link|runtime-nvm|runtime-uv|runtime-rustup)
             return 0
             ;;
     esac
@@ -67,6 +87,7 @@ bootstrap_action_known() {
 
 bootstrap_action_deps_array() {
     local action="$1"
+    action="$(bootstrap_action_normalize "$action")"
     local array_name="$2"
     local deps_value="${BOOTSTRAP_ACTION_DEPS[$action]:-}"
     local -a dep_items=()
@@ -79,6 +100,12 @@ bootstrap_action_deps_array() {
     target_ref=("${dep_items[@]}")
 }
 
+bootstrap_action_privilege() {
+    local action="$1"
+    action="$(bootstrap_action_normalize "$action")"
+    printf '%s\n' "${BOOTSTRAP_ACTION_PRIVILEGES[$action]:-user}"
+}
+
 bootstrap_catalog_manifest() {
     local action
     for action in "${BOOTSTRAP_ACTION_ORDER[@]}"; do
@@ -86,7 +113,8 @@ bootstrap_catalog_manifest() {
             "$action" \
             "${BOOTSTRAP_ACTION_LABELS[$action]}" \
             "${BOOTSTRAP_ACTION_GROUPS[$action]}" \
-            "${BOOTSTRAP_ACTION_DEPS[$action]}"
+            "${BOOTSTRAP_ACTION_DEPS[$action]}" \
+            "${BOOTSTRAP_ACTION_PRIVILEGES[$action]}"
     done
 }
 

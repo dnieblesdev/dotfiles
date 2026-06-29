@@ -123,6 +123,13 @@ bootstrap_state_write() {
   "catalog_hash": $(bootstrap_json_quote "$catalog_hash"),
   "updated_at": $(bootstrap_json_quote "$updated_at"),
   "last_status": $(bootstrap_json_quote "$status"),
+  "context": {
+    "target_user": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_TARGET_USER:-${BOOTSTRAP_TARGET_USER:-}}"),
+    "target_home": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME:-${BOOTSTRAP_TARGET_HOME:-}}"),
+    "effective_user": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER:-$(bootstrap_effective_user)}"),
+    "execution_context": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_EXECUTION:-$(bootstrap_execution_context)}"),
+    "frontend": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_FRONTEND:-${BOOTSTRAP_FRONTEND_MODE:-unknown}}")
+  },
   "selection": {
     "only": $(bootstrap_join_json_array "${only[@]}"),
     "skip": $(bootstrap_join_json_array "${skip[@]}"),
