@@ -25,16 +25,35 @@ bootstrap_state_file() {
     printf '%s/bootstrap-state.json\n' "$(bootstrap_state_dir)"
 }
 
+bootstrap_state_signature_file() {
+    printf '%s/bootstrap-secret\n' "$(bootstrap_state_dir)"
+}
+
 bootstrap_state_is_current() {
     local expected_hash="$1"
+    local expected_target_user="$2"
+    local expected_target_home="$3"
+    local expected_effective_user="$4"
+    local expected_execution_context="$5"
     local state_file
+    local signature_file
     state_file="$(bootstrap_state_file)"
+    signature_file="$(bootstrap_state_signature_file)"
 
-    python3 - "$state_file" "$expected_hash" <<'PY'
+    python3 - "$state_file" "$signature_file" "$expected_hash" "$expected_target_user" "$expected_target_home" "$expected_effective_user" "$expected_execution_context" <<'PY'
 import json, os, sys
+import hmac
+import hashlib
 
 state_file = sys.argv[1]
-expected_hash = sys.argv[2]
+signature_file = sys.argv[2]
+expected_hash = sys.argv[3]
+expected_context = {
+    'target_user': sys.argv[4],
+    'target_home': sys.argv[5],
+    'effective_user': sys.argv[6],
+    'execution_context': sys.argv[7],
+}
 
 try:
     with open(state_file, 'r', encoding='utf-8') as fh:
@@ -44,11 +63,37 @@ except FileNotFoundError:
 except Exception:
     raise SystemExit(1)
 
+try:
+    with open(signature_file, 'r', encoding='utf-8') as fh:
+        secret = fh.read().strip()
+except Exception:
+    raise SystemExit(1)
+
+if not secret:
+    raise SystemExit(1)
+
+signature = data.get('signature', '')
+if not signature:
+    raise SystemExit(1)
+
+payload = dict(data)
+payload.pop('signature', None)
+canonical = json.dumps(payload, indent=2, separators=(', ', ': '), ensure_ascii=False)
+expected_signature = hmac.new(secret.encode('utf-8'), canonical.encode('utf-8'), hashlib.sha256).hexdigest()
+
+if signature != expected_signature:
+    raise SystemExit(1)
+
 if data.get('schema_version') != 1:
     raise SystemExit(1)
 
 if data.get('catalog_hash') != expected_hash:
     raise SystemExit(1)
+
+context = data.get('context', {})
+for key, expected in expected_context.items():
+    if context.get(key, '') != expected:
+        raise SystemExit(1)
 
 raise SystemExit(0)
 PY
@@ -56,14 +101,29 @@ PY
 
 bootstrap_state_completed_actions() {
     local expected_hash="$1"
+    local expected_target_user="$2"
+    local expected_target_home="$3"
+    local expected_effective_user="$4"
+    local expected_execution_context="$5"
     local state_file
+    local signature_file
     state_file="$(bootstrap_state_file)"
+    signature_file="$(bootstrap_state_signature_file)"
 
-    python3 - "$state_file" "$expected_hash" <<'PY'
+    python3 - "$state_file" "$signature_file" "$expected_hash" "$expected_target_user" "$expected_target_home" "$expected_effective_user" "$expected_execution_context" <<'PY'
 import json, sys
+import hmac
+import hashlib
 
 state_file = sys.argv[1]
-expected_hash = sys.argv[2]
+signature_file = sys.argv[2]
+expected_hash = sys.argv[3]
+expected_context = {
+    'target_user': sys.argv[4],
+    'target_home': sys.argv[5],
+    'effective_user': sys.argv[6],
+    'execution_context': sys.argv[7],
+}
 
 try:
     with open(state_file, 'r', encoding='utf-8') as fh:
@@ -71,11 +131,37 @@ try:
 except Exception:
     raise SystemExit(0)
 
+try:
+    with open(signature_file, 'r', encoding='utf-8') as fh:
+        secret = fh.read().strip()
+except Exception:
+    raise SystemExit(0)
+
+if not secret:
+    raise SystemExit(0)
+
+signature = data.get('signature', '')
+if not signature:
+    raise SystemExit(0)
+
+payload = dict(data)
+payload.pop('signature', None)
+canonical = json.dumps(payload, indent=2, separators=(', ', ': '), ensure_ascii=False)
+expected_signature = hmac.new(secret.encode('utf-8'), canonical.encode('utf-8'), hashlib.sha256).hexdigest()
+
+if signature != expected_signature:
+    raise SystemExit(0)
+
 if data.get('schema_version') != 1:
     raise SystemExit(0)
 
 if data.get('catalog_hash') != expected_hash:
     raise SystemExit(0)
+
+context = data.get('context', {})
+for key, expected in expected_context.items():
+    if context.get(key, '') != expected:
+        raise SystemExit(0)
 
 for action in data.get('completed_actions', []):
     print(action)
@@ -95,9 +181,26 @@ bootstrap_state_write() {
     local execute_csv="${10:-}"
     local completed_csv="${11:-}"
     local state_file
+    local signature_file
     state_file="$(bootstrap_state_file)"
+    signature_file="$(bootstrap_state_signature_file)"
 
     mkdir -p "$(bootstrap_state_dir)"
+    chmod 700 "$(bootstrap_state_dir)"
+
+    local secret payload
+    local context_target_user context_target_home context_effective_user context_execution_context context_frontend
+    secret="$(bootstrap_integrity_load_secret)"
+    context_target_user="${BOOTSTRAP_PLAN_CONTEXT_TARGET_USER:-}"
+    [ -n "$context_target_user" ] || context_target_user="$(bootstrap_target_user)"
+    context_target_home="${BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME:-}"
+    [ -n "$context_target_home" ] || context_target_home="$(bootstrap_target_home)"
+    context_effective_user="${BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER:-}"
+    [ -n "$context_effective_user" ] || context_effective_user="$(bootstrap_effective_user)"
+    context_execution_context="${BOOTSTRAP_PLAN_CONTEXT_EXECUTION:-}"
+    [ -n "$context_execution_context" ] || context_execution_context="$(bootstrap_execution_context)"
+    context_frontend="${BOOTSTRAP_PLAN_CONTEXT_FRONTEND:-}"
+    [ -n "$context_frontend" ] || context_frontend="${BOOTSTRAP_FRONTEND_MODE:-unknown}"
 
     local updated_at
     updated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -116,7 +219,7 @@ bootstrap_state_write() {
     bootstrap_split_csv_into_array "$execute_csv" execute
     bootstrap_split_csv_into_array "$completed_csv" completed
 
-    cat >"$state_file" <<EOF
+    payload="$(cat <<EOF
 {
   "schema_version": ${BOOTSTRAP_SCHEMA_VERSION},
   "catalog_version": ${BOOTSTRAP_CATALOG_VERSION},
@@ -124,11 +227,11 @@ bootstrap_state_write() {
   "updated_at": $(bootstrap_json_quote "$updated_at"),
   "last_status": $(bootstrap_json_quote "$status"),
   "context": {
-    "target_user": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_TARGET_USER:-${BOOTSTRAP_TARGET_USER:-}}"),
-    "target_home": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME:-${BOOTSTRAP_TARGET_HOME:-}}"),
-    "effective_user": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER:-$(bootstrap_effective_user)}"),
-    "execution_context": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_EXECUTION:-$(bootstrap_execution_context)}"),
-    "frontend": $(bootstrap_json_quote "${BOOTSTRAP_PLAN_CONTEXT_FRONTEND:-${BOOTSTRAP_FRONTEND_MODE:-unknown}}")
+    "target_user": $(bootstrap_json_quote "$context_target_user"),
+    "target_home": $(bootstrap_json_quote "$context_target_home"),
+    "effective_user": $(bootstrap_json_quote "$context_effective_user"),
+    "execution_context": $(bootstrap_json_quote "$context_execution_context"),
+    "frontend": $(bootstrap_json_quote "$context_frontend")
   },
   "selection": {
     "only": $(bootstrap_join_json_array "${only[@]}"),
@@ -145,4 +248,7 @@ bootstrap_state_write() {
   "failed_message": $(bootstrap_json_quote "$failed_message")
 }
 EOF
+)"
+
+    printf '%s' "$payload" | bootstrap_json_sign_canonical "$secret" >"$state_file"
 }

@@ -55,7 +55,7 @@ declare -A BOOTSTRAP_ACTION_DEPS=(
 
 declare -A BOOTSTRAP_ACTION_PRIVILEGES=(
     [system-packages]="elevated"
-    [homebrew-bootstrap]="mixed"
+    [homebrew-bootstrap]="user"
     [brew-tools]="user"
     [dotfiles-clone]="user"
     [dotfiles-backup]="user"
@@ -103,7 +103,13 @@ bootstrap_action_deps_array() {
 bootstrap_action_privilege() {
     local action="$1"
     action="$(bootstrap_action_normalize "$action")"
-    printf '%s\n' "${BOOTSTRAP_ACTION_PRIVILEGES[$action]:-user}"
+
+    if [ -z "${BOOTSTRAP_ACTION_PRIVILEGES[$action]+x}" ] || [ -z "${BOOTSTRAP_ACTION_PRIVILEGES[$action]}" ]; then
+        printf 'Missing privilege metadata for action: %s\n' "$action" >&2
+        return 4
+    fi
+
+    printf '%s\n' "${BOOTSTRAP_ACTION_PRIVILEGES[$action]}"
 }
 
 bootstrap_catalog_manifest() {

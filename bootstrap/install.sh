@@ -72,28 +72,72 @@ is_linux() {
     [ "$(uname)" = Linux ] && ! is_wsl
 }
 
-brew_candidates() {
+bootstrap_brew_candidate_paths() {
+    local target_home
+
+    target_home="$(bootstrap_target_home)"
+
     printf '%s\n' \
-        "$HOME/.linuxbrew/bin/brew" \
+        "$target_home/.linuxbrew/bin/brew" \
         "/home/linuxbrew/.linuxbrew/bin/brew" \
         "/opt/homebrew/bin/brew" \
         "/usr/local/bin/brew"
 }
 
-find_brew_binary() {
-    if command_exists brew; then
-        command -v brew
-        return 0
+bootstrap_brew_binary_matches_target_owner() {
+    local brew_bin="$1"
+    local target_user
+    local target_uid=""
+    local prefix_root=""
+    local path_owner=""
+    local prefix_owner=""
+
+    if [ -z "$brew_bin" ]; then
+        return 1
     fi
 
+    target_user="$(bootstrap_target_user)"
+    target_uid="$(id -u "$target_user" 2>/dev/null || true)"
+    if [ -z "$target_uid" ]; then
+        return 1
+    fi
+
+    prefix_root="$(dirname "$(dirname "$brew_bin")")"
+    path_owner="$(bootstrap_path_owner_uid "$brew_bin" 2>/dev/null || true)"
+    prefix_owner="$(bootstrap_path_owner_uid "$prefix_root" 2>/dev/null || true)"
+
+    [ "$path_owner" = "$target_uid" ] && [ "$prefix_owner" = "$target_uid" ]
+}
+
+find_brew_binary() {
     local candidate
+    local candidate_owner
+    local prefix_owner
+    local prefix_root
+    local target_user
+    local target_uid=""
+
+    target_user="$(bootstrap_target_user)"
+    target_uid="$(id -u "$target_user" 2>/dev/null || true)"
+
     while IFS= read -r candidate; do
-        if [ -x "$candidate" ]; then
+        [ -n "$candidate" ] || continue
+        [ -x "$candidate" ] || continue
+
+        prefix_root="$(dirname "$(dirname "$candidate")")"
+        candidate_owner="$(bootstrap_path_owner_uid "$candidate" 2>/dev/null || true)"
+        prefix_owner="$(bootstrap_path_owner_uid "$prefix_root" 2>/dev/null || true)"
+
+        if [ -n "$target_uid" ] && [ "$candidate_owner" = "$target_uid" ] && [ "$prefix_owner" = "$target_uid" ]; then
             printf '%s\n' "$candidate"
             return 0
         fi
+
+        if [ -n "$target_uid" ] && [ -n "$candidate_owner" ] && [ -n "$prefix_owner" ]; then
+            warn "Ignoring brew at $candidate because ownership uid $candidate_owner and prefix uid $prefix_owner do not match target uid $target_uid"
+        fi
     done <<EOF
-$(brew_candidates)
+$(bootstrap_brew_candidate_paths)
 EOF
 
     return 1
@@ -338,9 +382,12 @@ bootstrap_run_action() {
 bootstrap_spawn_shell_action() {
     local user_mode="$1"
     local action="$2"
-    local target_user="${BOOTSTRAP_TARGET_USER:-$(bootstrap_target_user)}"
-    local target_home="${BOOTSTRAP_TARGET_HOME:-}"
+    local target_user
+    local target_home
     local script_path="$SCRIPT_DIR/install.sh"
+
+    target_user="$(bootstrap_target_user)"
+    target_home="$(bootstrap_target_home)"
 
     if [ "$user_mode" = "root" ]; then
         if [ "$(bootstrap_effective_uid)" -eq 0 ]; then
@@ -348,8 +395,11 @@ bootstrap_spawn_shell_action() {
             source "$SCRIPT_DIR/lib/catalog.sh"
             source "$SCRIPT_DIR/lib/state.sh"
             source "$SCRIPT_DIR/lib/planner.sh"
-            bootstrap_run_action "$action"
-            return 0
+            if bootstrap_run_action "$action"; then
+                return 0
+            else
+                return $?
+            fi
         fi
         run_privileged bash -c 'source "$1"; source "$(dirname "$1")/lib/util.sh"; source "$(dirname "$1")/lib/catalog.sh"; source "$(dirname "$1")/lib/state.sh"; source "$(dirname "$1")/lib/planner.sh"; bootstrap_run_action "$2"' _ "$script_path" "$action"
         return $?
@@ -387,7 +437,11 @@ bootstrap_spawn_shell_action() {
 bootstrap_execute_action() {
     local action="$1"
     local privilege
-    privilege="$(bootstrap_action_privilege "$action")"
+    if privilege="$(bootstrap_action_privilege "$action")"; then
+        :
+    else
+        return $?
+    fi
 
     case "$privilege" in
         user)
@@ -409,8 +463,8 @@ bootstrap_execute_action() {
 bootstrap_show_startup_context() {
     local command_name="${1:-apply}"
     BOOTSTRAP_FRONTEND_MODE="$command_name"
-    BOOTSTRAP_TARGET_USER="${BOOTSTRAP_TARGET_USER:-$(bootstrap_target_user)}"
-    BOOTSTRAP_TARGET_HOME="${BOOTSTRAP_TARGET_HOME:-$(bootstrap_target_home)}"
+    BOOTSTRAP_TARGET_USER="$(bootstrap_target_user)"
+    BOOTSTRAP_TARGET_HOME="$(bootstrap_target_home)"
     BOOTSTRAP_EFFECTIVE_USER="$(bootstrap_effective_user)"
     BOOTSTRAP_EFFECTIVE_UID="$(bootstrap_effective_uid)"
     BOOTSTRAP_EXECUTION_CONTEXT="$(bootstrap_execution_context)"
@@ -555,9 +609,9 @@ bootstrap_execute_plan() {
                 "$execute_csv" \
                 "$(bootstrap_join_csv "${completed[@]}")"
             continue
+        else
+            rc=$?
         fi
-
-        rc=$?
         bootstrap_state_write \
             "$BOOTSTRAP_CATALOG_HASH" \
             "partial_failure" \
@@ -628,10 +682,17 @@ bootstrap_command_apply() {
             return 4
         fi
 
+        local saved_ordered_csv saved_execute_csv
+        saved_ordered_csv="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_ORDERED[@]}")"
+        saved_execute_csv="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_EXECUTE[@]}")"
         BOOTSTRAP_CATALOG_HASH="$current_hash"
         BOOTSTRAP_ONLY_CSV="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_ONLY[@]}")"
         BOOTSTRAP_SKIP_CSV="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_SKIP[@]}")"
         BOOTSTRAP_FORCE_CSV="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_FORCE[@]}")"
+        bootstrap_plan_compute "$BOOTSTRAP_ONLY_CSV" "$BOOTSTRAP_SKIP_CSV" "$BOOTSTRAP_FORCE_CSV"
+        if ! bootstrap_plan_revalidate_saved_replay "$saved_ordered_csv" "$saved_execute_csv"; then
+            return 4
+        fi
     else
         bootstrap_plan_compute "$BOOTSTRAP_ONLY_CSV" "$BOOTSTRAP_SKIP_CSV" "$BOOTSTRAP_FORCE_CSV"
     fi
@@ -669,29 +730,96 @@ bootstrap_command_list() {
 }
 
 bootstrap_self_test() {
-    local temp_dir temp_state temp_plan temp_stale_plan
+    local temp_dir temp_state temp_state_seed temp_plan temp_stale_plan temp_tampered_plan temp_tampered_state temp_malicious_plan
     local -a execution_trace=()
     local -a warning_trace=()
     local baseline_hash mutated_hash
+    local rc
     temp_dir="$(mktemp -d)"
     temp_state="$temp_dir/bootstrap-state.json"
+    temp_state_seed="$temp_dir/bootstrap-state-seed.json"
     temp_plan="$temp_dir/bootstrap-plan.json"
     temp_stale_plan="$temp_dir/bootstrap-plan-stale.json"
+    temp_tampered_plan="$temp_dir/bootstrap-plan-tampered.json"
+    temp_tampered_state="$temp_dir/bootstrap-state-tampered.json"
+    temp_malicious_plan="$temp_dir/bootstrap-plan-malicious.json"
+
+    local real_uid real_user
+    real_uid="$(id -u)"
+    real_user="$(id -un)"
+
+    bootstrap_effective_uid() {
+        printf '0\n'
+    }
+
+    bootstrap_effective_user() {
+        printf 'root\n'
+    }
+
+    local saved_bootstrap_sudo_provenance_trusted
+    saved_bootstrap_sudo_provenance_trusted="$(declare -f bootstrap_sudo_provenance_trusted)"
+    bootstrap_sudo_provenance_trusted() {
+        return 1
+    }
+
+    if [ "$(SUDO_USER="$real_user" SUDO_UID="$real_uid" bootstrap_target_user)" != "root" ]; then
+        err "Expected stale sudo identity to be ignored without provenance evidence"
+        return 1
+    fi
+
+    if [ "$(SUDO_USER="$real_user" SUDO_UID="$real_uid" bootstrap_execution_context)" != "root-shell" ]; then
+        err "Expected stale sudo identity to stay root-shell without provenance evidence"
+        return 1
+    fi
+
+    bootstrap_sudo_provenance_trusted() {
+        return 0
+    }
+
+    if [ "$(SUDO_USER="$real_user" SUDO_UID="$real_uid" bootstrap_target_user)" != "$real_user" ]; then
+        err "Expected valid sudo provenance to resolve the target user"
+        return 1
+    fi
+
+    if [ "$(SUDO_USER="$real_user" SUDO_UID="$real_uid" bootstrap_execution_context)" != "root-via-sudo" ]; then
+        err "Expected valid sudo provenance to resolve the execution context"
+        return 1
+    fi
+
+    eval "$saved_bootstrap_sudo_provenance_trusted"
+
+    BOOTSTRAP_TARGET_USER="alice"
+    BOOTSTRAP_TARGET_HOME="/home/alice"
+    if [ "$(bootstrap_target_user)" != "root" ]; then
+        err "Expected target user overrides to be ignored outside test mode"
+        return 1
+    fi
+    if [ "$(bootstrap_target_home)" != "/root" ]; then
+        err "Expected target home overrides to be ignored outside test mode"
+        return 1
+    fi
 
     warn() {
         warning_trace+=("warn:$*")
     }
 
-    bootstrap_spawn_shell_action() {
-        execution_trace+=("$1:$2:${BOOTSTRAP_TARGET_USER:-}:${BOOTSTRAP_TARGET_HOME:-}")
-        return 0
-    }
-
-    BOOTSTRAP_TEST_UID=0
-    BOOTSTRAP_TEST_USER=root
     BOOTSTRAP_AUTO_CONFIRM=1
-    BOOTSTRAP_TARGET_USER="alice"
-    BOOTSTRAP_TARGET_HOME="/home/alice"
+
+    if bootstrap_prompt_yes_no "Confirm override requires test mode"; then
+        err "Expected auto-confirm to be ignored outside explicit test mode"
+        return 1
+    fi
+
+    BOOTSTRAP_TEST_MODE=1
+
+    if [ "$(bootstrap_target_user)" != "alice" ]; then
+        err "Expected target user overrides to work in explicit test mode"
+        return 1
+    fi
+    if [ "$(bootstrap_target_home)" != "/home/alice" ]; then
+        err "Expected target home overrides to work in explicit test mode"
+        return 1
+    fi
 
     if ! bootstrap_confirm_root_warning; then
         err "Expected root confirmation to pass with auto-confirm"
@@ -702,6 +830,38 @@ bootstrap_self_test() {
         err "Expected root warning messages to be emitted"
         return 1
     fi
+
+    bootstrap_run_action() {
+        execution_trace+=("run:$1")
+        return 17
+    }
+
+    if bootstrap_spawn_shell_action root "homebrew-bootstrap" >/dev/null 2>&1; then
+        err "Expected root-shell action failures to propagate"
+        return 1
+    else
+        rc=$?
+    fi
+
+    if [ "$rc" -ne 17 ]; then
+        err "Expected root-shell action to return the underlying failure"
+        return 1
+    fi
+
+    unset -f bootstrap_run_action
+
+    bootstrap_effective_uid() {
+        printf '0\n'
+    }
+
+    bootstrap_effective_user() {
+        printf 'root\n'
+    }
+
+    bootstrap_spawn_shell_action() {
+        execution_trace+=("$1:$2:${BOOTSTRAP_TARGET_USER:-}:${BOOTSTRAP_TARGET_HOME:-}")
+        return 0
+    }
 
     local saved_target_user="${BOOTSTRAP_TARGET_USER:-}"
     local saved_target_home="${BOOTSTRAP_TARGET_HOME:-}"
@@ -714,6 +874,64 @@ bootstrap_self_test() {
     fi
     BOOTSTRAP_TARGET_USER="$saved_target_user"
     BOOTSTRAP_TARGET_HOME="$saved_target_home"
+
+    local saved_privilege="${BOOTSTRAP_ACTION_PRIVILEGES[brew-tools]:-}"
+    unset 'BOOTSTRAP_ACTION_PRIVILEGES[brew-tools]'
+    if BOOTSTRAP_FRONTEND_MODE=apply BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" "" >/dev/null 2>&1; then
+        err "Expected missing privilege metadata to be rejected"
+        return 1
+    fi
+    BOOTSTRAP_ACTION_PRIVILEGES[brew-tools]="$saved_privilege"
+
+    local saved_bootstrap_execute_action
+    saved_bootstrap_execute_action="$(declare -f bootstrap_execute_action)"
+    bootstrap_execute_action() {
+        execution_trace+=("fail:$1")
+        return 23
+    }
+
+    BOOTSTRAP_FRONTEND_MODE=apply
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
+    execution_trace=()
+    warning_trace=()
+    if BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_execute_plan >/dev/null 2>&1; then
+        err "Expected failed actions to stop the bootstrap"
+        return 1
+    else
+        rc=$?
+    fi
+
+    if [ "$rc" -ne 23 ]; then
+        err "Expected bootstrap_execute_plan to return the failing action status"
+        return 1
+    fi
+
+    if [ "${#execution_trace[@]}" -ne 1 ]; then
+        err "Expected the failing action to run exactly once"
+        return 1
+    fi
+
+    python3 - "$temp_state" <<'PY'
+import json, sys
+
+state = json.load(open(sys.argv[1], 'r', encoding='utf-8'))
+assert state['last_status'] == 'partial_failure', state
+assert state['failed_action'] == 'system-packages', state
+assert state['completed_actions'] == [], state
+PY
+
+    if bootstrap_state_is_current \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "sudo-session" \
+        "apply"; then
+        err "Expected state reuse to fail across execution contexts"
+        return 1
+    fi
+
+    eval "$saved_bootstrap_execute_action"
 
     baseline_hash="$(bootstrap_catalog_hash)"
     BOOTSTRAP_ACTION_PRIVILEGES[brew-tools]="mixed"
@@ -757,6 +975,8 @@ bootstrap_self_test() {
         "brew-tools" \
         "system-packages,homebrew-bootstrap"
 
+    cp "$temp_state" "$temp_state_seed"
+
     BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
     if ! bootstrap_array_contains "brew-tools" "${BOOTSTRAP_PLAN_EXECUTE[@]}"; then
         err "Expected brew-tools to remain scheduled"
@@ -771,107 +991,269 @@ import json, sys
 plan = json.loads(sys.argv[1])
 privileges = {a['id']: a['privilege'] for a in plan['actions']}
 assert privileges['system-packages'] == 'elevated', privileges
-assert privileges['homebrew-bootstrap'] == 'mixed', privileges
+assert privileges['homebrew-bootstrap'] == 'user', privileges
 assert privileges['brew-tools'] == 'user', privileges
 assert plan['context']['frontend'] == 'apply', plan['context']
 PY
+
+    local saved_bootstrap_brew_candidate_paths saved_bootstrap_path_owner_uid
+    local temp_brew_user_dir temp_brew_system_dir user_brew_bin system_brew_bin
+    temp_brew_user_dir="$temp_dir/user-home"
+    temp_brew_system_dir="$temp_dir/system-prefix"
+    user_brew_bin="$temp_brew_user_dir/.linuxbrew/bin/brew"
+    system_brew_bin="$temp_brew_system_dir/usr/local/bin/brew"
+    mkdir -p "$(dirname "$user_brew_bin")" "$(dirname "$system_brew_bin")"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$user_brew_bin"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$system_brew_bin"
+    chmod +x "$user_brew_bin" "$system_brew_bin"
+
+    saved_bootstrap_brew_candidate_paths="$(declare -f bootstrap_brew_candidate_paths)"
+    saved_bootstrap_path_owner_uid="$(declare -f bootstrap_path_owner_uid)"
+    bootstrap_brew_candidate_paths() {
+        printf '%s\n' "$system_brew_bin" "$user_brew_bin"
+    }
+    bootstrap_path_owner_uid() {
+        case "$1" in
+            "$system_brew_bin"|"$temp_brew_system_dir/usr/local")
+                printf '0\n'
+                ;;
+            "$user_brew_bin"|"$temp_brew_user_dir/.linuxbrew")
+                printf '%s\n' "$real_uid"
+                ;;
+            *)
+                printf '%s\n' "$real_uid"
+                ;;
+        esac
+    }
+
+    BOOTSTRAP_TARGET_USER="$real_user"
+    BOOTSTRAP_TARGET_HOME="$temp_brew_user_dir"
+    if [ "$(find_brew_binary)" != "$user_brew_bin" ]; then
+        err "Expected brew selection to prefer the user-owned prefix"
+        return 1
+    fi
+
+    bootstrap_path_owner_uid() {
+        case "$1" in
+            "$system_brew_bin"|"$temp_brew_system_dir/usr/local"|"$user_brew_bin"|"$temp_brew_user_dir/.linuxbrew")
+                printf '0\n'
+                ;;
+            *)
+                printf '%s\n' "$real_uid"
+                ;;
+        esac
+    }
+
+    if find_brew_binary >/dev/null 2>&1; then
+        err "Expected wrong-owned brew prefixes to be rejected"
+        return 1
+    fi
+
+    eval "$saved_bootstrap_brew_candidate_paths"
+    eval "$saved_bootstrap_path_owner_uid"
+
+    cat <<EOF | bootstrap_json_sign_canonical "$(bootstrap_integrity_load_secret)" >"$temp_malicious_plan"
+{
+  "schema_version": 1,
+  "catalog_version": 1,
+  "catalog_hash": "safe-catalog-hash",
+  "context": {
+    "target_user": "alice\\ncontext_execution_context=overwritten",
+    "target_home": "/home/alice",
+    "effective_user": "root",
+    "execution_context": "root-shell",
+    "frontend": "plan"
+  },
+  "selection": {
+    "only": ["brew-tools"],
+    "skip": [],
+    "force": []
+  },
+  "ordered": ["system-packages", "homebrew-bootstrap", "brew-tools"],
+  "execute": ["brew-tools"],
+  "completed": ["system-packages", "homebrew-bootstrap"]
+}
+EOF
+
+    bootstrap_plan_from_json_file "$temp_malicious_plan"
+    if [ "$BOOTSTRAP_PLAN_CATALOG_HASH" != "safe-catalog-hash" ]; then
+        err "Expected safe parsing to preserve the catalog hash"
+        return 1
+    fi
+
+    if [ "$BOOTSTRAP_PLAN_CONTEXT_EXECUTION" != "root-shell" ]; then
+        err "Expected safe parsing to preserve the execution context"
+        return 1
+    fi
+
+    if [ "$BOOTSTRAP_PLAN_CONTEXT_TARGET_USER" != "$(printf 'alice\ncontext_execution_context=overwritten')" ]; then
+        err "Expected safe parsing to preserve newline-bearing values"
+        return 1
+    fi
 
     rm -f "$temp_state"
     BOOTSTRAP_FRONTEND_MODE=apply BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
     execution_trace=()
     warning_trace=()
-    BOOTSTRAP_STATE_FILE="$temp_state" BOOTSTRAP_TEST_UID=0 BOOTSTRAP_TEST_USER=root BOOTSTRAP_TARGET_USER="alice" BOOTSTRAP_TARGET_HOME="/home/alice" bootstrap_execute_plan
+    BOOTSTRAP_STATE_FILE="$temp_state" BOOTSTRAP_TARGET_USER="alice" BOOTSTRAP_TARGET_HOME="/home/alice" bootstrap_execute_plan
     if [ "$(bootstrap_join_csv "${execution_trace[@]}")" != "root:system-packages:alice:/home/alice,user:homebrew-bootstrap:alice:/home/alice,user:brew-tools:alice:/home/alice" ]; then
         err "Expected per-action privilege routing to keep user-owned actions out of root"
         return 1
     fi
 
-    cat >"$temp_plan" <<EOF
-{
-  "schema_version": 1,
-  "catalog_version": 1,
-  "catalog_hash": $(bootstrap_json_quote "$(bootstrap_catalog_hash)"),
-  "context": {
-    "target_user": "alice",
-    "target_home": "/home/alice",
-    "effective_user": "root",
-    "execution_context": "root-shell",
-    "frontend": "apply"
-  },
-  "selection": {
-    "only": ["brew-tools"],
-    "skip": [],
-    "force": []
-  },
-  "ordered": ["system-packages", "homebrew-bootstrap", "brew-tools"],
-  "execute": ["brew-tools"],
-  "completed": ["system-packages", "homebrew-bootstrap"]
-}
-EOF
+    cp "$temp_state_seed" "$temp_state"
+    BOOTSTRAP_STATE_FILE="$temp_state"
+    BOOTSTRAP_FRONTEND_MODE=apply BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
 
-    execution_trace=()
-    warning_trace=()
-    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_command_apply --plan "$temp_plan" >/dev/null 2>&1
-    if [ "$(bootstrap_join_csv "${execution_trace[@]}")" != "user:brew-tools:alice:/home/alice" ]; then
-        err "Expected saved plan execution to honor the persisted execute list"
+    signed_plan_round_trip="$(bootstrap_plan_emit_json)"
+    printf '%s\n' "$signed_plan_round_trip" >"$temp_plan"
+    bootstrap_plan_from_json_file "$temp_plan" >/dev/null 2>&1 || {
+        err "Expected signed plan to load cleanly"
+        return 1
+    }
+    if [ -z "${BOOTSTRAP_PLAN_SIGNATURE:-}" ]; then
+        err "Expected signed plan to carry a signature"
         return 1
     fi
 
-    python3 - "$temp_state" <<'PY'
+    cp "$temp_plan" "$temp_tampered_plan"
+    python3 - "$temp_tampered_plan" <<'PY'
 import json, sys
 
-state = json.load(open(sys.argv[1], 'r', encoding='utf-8'))
-assert state['selection']['only'] == ['brew-tools'], state['selection']
-assert state['plan']['ordered'] == ['system-packages', 'homebrew-bootstrap', 'brew-tools'], state['plan']
-assert state['plan']['execute'] == ['brew-tools'], state['plan']
-assert state['completed_actions'] == ['system-packages', 'homebrew-bootstrap', 'brew-tools'], state['completed_actions']
-assert state['context']['target_user'] == 'alice', state['context']
-assert state['context']['target_home'] == '/home/alice', state['context']
-assert state['context']['effective_user'] == 'root', state['context']
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+
+data['execute'] = ['brew-tools', 'system-packages']
+with open(path, 'w', encoding='utf-8') as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
 PY
 
-    cat >"$temp_stale_plan" <<EOF
-{
-  "schema_version": 1,
-  "catalog_version": 1,
-  "catalog_hash": "stale-catalog-hash",
-  "context": {
-    "target_user": "alice",
-    "target_home": "/home/alice",
-    "effective_user": "root",
-    "execution_context": "root-shell",
-    "frontend": "apply"
-  },
-  "selection": {
-    "only": ["brew-tools"],
-    "skip": [],
-    "force": []
-  },
-  "ordered": ["system-packages", "homebrew-bootstrap", "brew-tools"],
-  "execute": ["brew-tools"],
-  "completed": ["system-packages", "homebrew-bootstrap"]
-}
-EOF
-
+    cp "$temp_state_seed" "$temp_state"
     execution_trace=()
     warning_trace=()
-    if BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_command_apply --plan "$temp_stale_plan" >/dev/null 2>&1; then
-        err "Expected stale saved plan to be rejected"
+    set +e
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_command_apply --plan "$temp_tampered_plan" >/dev/null 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+        err "Expected tampered saved plan to be rejected"
         return 1
     fi
     if [ "${#execution_trace[@]}" -ne 0 ]; then
-        err "Expected stale saved plan rejection before any actions ran"
+        err "Expected tampered saved plan rejection before any actions ran"
+        return 1
+    fi
+
+    cp "$temp_state_seed" "$temp_state"
+    if ! bootstrap_state_is_current \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "root-shell" \
+        "apply"; then
+        err "Expected signed state to load cleanly"
+        return 1
+    fi
+
+    completed_trace=()
+    while IFS= read -r action; do
+        [ -n "$action" ] && completed_trace+=("$action")
+    done < <(BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_state_completed_actions \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "root-shell" \
+        "apply")
+
+    if [ "$(bootstrap_join_csv "${completed_trace[@]}")" != "system-packages,homebrew-bootstrap" ]; then
+        err "Expected signed state round-trip to preserve the completed-actions list"
+        return 1
+    fi
+
+    cp "$temp_plan" "$temp_stale_plan"
+    python3 - "$temp_stale_plan" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+
+data['catalog_hash'] = 'stale-catalog-hash'
+with open(path, 'w', encoding='utf-8') as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+PY
+    cp "$temp_stale_plan" "$temp_stale_plan.resigned"
+    bootstrap_json_sign_canonical "$(bootstrap_integrity_load_secret)" <"$temp_stale_plan" >"$temp_stale_plan.resigned"
+    mv "$temp_stale_plan.resigned" "$temp_stale_plan"
+
+    cp "$temp_state_seed" "$temp_state"
+    execution_trace=()
+    warning_trace=()
+    set +e
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_command_apply --plan "$temp_stale_plan" >/dev/null 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+        err "Expected stale signed saved plan to be rejected"
+        return 1
+    fi
+    if [ "${#execution_trace[@]}" -ne 0 ]; then
+        err "Expected stale signed saved plan rejection before any actions ran"
+        return 1
+    fi
+
+    cp "$temp_state_seed" "$temp_tampered_state"
+    python3 - "$temp_tampered_state" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+
+data['completed_actions'] = ['brew-tools']
+with open(path, 'w', encoding='utf-8') as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+PY
+
+    if bootstrap_state_is_current \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "sudo-session" \
+        "apply"; then
+        err "Expected tampered state to be rejected"
+        return 1
+    fi
+
+    if [ -n "$(BOOTSTRAP_STATE_FILE="$temp_tampered_state" bootstrap_state_completed_actions \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "sudo-session" 2>/dev/null)" ]; then
+        err "Expected tampered state completed-actions replay to be empty"
         return 1
     fi
 
     execution_trace=()
     warning_trace=()
-    if BOOTSTRAP_STATE_FILE="$temp_state" BOOTSTRAP_TEST_USER=bob BOOTSTRAP_TARGET_USER="bob" BOOTSTRAP_TARGET_HOME="/home/bob" bootstrap_command_apply --plan "$temp_plan" >/dev/null 2>&1; then
-        err "Expected saved plan context mismatch to be rejected"
+    set +e
+    BOOTSTRAP_STATE_FILE="$temp_state" BOOTSTRAP_TARGET_USER="bob" BOOTSTRAP_TARGET_HOME="/home/bob" bootstrap_command_apply --plan "$temp_plan" >/dev/null 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+        err "Expected saved plan identity mismatch to be rejected"
         return 1
     fi
     if [ "${#execution_trace[@]}" -ne 0 ]; then
-        err "Expected saved plan context mismatch rejection before any actions ran"
+        err "Expected saved plan identity mismatch rejection before any actions ran"
         return 1
     fi
 

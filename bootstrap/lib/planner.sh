@@ -10,6 +10,7 @@ bootstrap_plan_reset() {
     BOOTSTRAP_PLAN_ORDERED=()
     BOOTSTRAP_PLAN_EXECUTE=()
     BOOTSTRAP_PLAN_COMPLETED=()
+    BOOTSTRAP_PLAN_SIGNATURE=""
     BOOTSTRAP_PLAN_CONTEXT_TARGET_USER=""
     BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME=""
     BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER=""
@@ -18,8 +19,8 @@ bootstrap_plan_reset() {
 }
 
 bootstrap_plan_snapshot_context() {
-    BOOTSTRAP_PLAN_CONTEXT_TARGET_USER="${BOOTSTRAP_TARGET_USER:-$(bootstrap_target_user)}"
-    BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME="${BOOTSTRAP_TARGET_HOME:-$(bootstrap_target_home)}"
+    BOOTSTRAP_PLAN_CONTEXT_TARGET_USER="$(bootstrap_target_user)"
+    BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME="$(bootstrap_target_home)"
     BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER="$(bootstrap_effective_user)"
     BOOTSTRAP_PLAN_CONTEXT_EXECUTION="$(bootstrap_execution_context)"
     BOOTSTRAP_PLAN_CONTEXT_FRONTEND="${BOOTSTRAP_FRONTEND_MODE:-unknown}"
@@ -86,6 +87,22 @@ bootstrap_plan_validate_closure() {
     done
 }
 
+bootstrap_plan_validate_privileges() {
+    local action privilege
+
+    for action in "${BOOTSTRAP_PLAN_ORDERED[@]}"; do
+        privilege="$(bootstrap_action_privilege "$action")" || return $?
+        case "$privilege" in
+            user|elevated|mixed)
+                ;;
+            *)
+                printf 'Bootstrap plan invalid: %s has unsupported privilege %s\n' "$action" "$privilege" >&2
+                return 4
+                ;;
+        esac
+    done
+}
+
 bootstrap_plan_compute() {
     local only_csv="${1:-}"
     local skip_csv="${2:-}"
@@ -135,11 +152,25 @@ bootstrap_plan_compute() {
         fi
     done
 
+    bootstrap_plan_validate_privileges || return $?
+
     expected_hash="$(bootstrap_catalog_hash)"
-    if bootstrap_state_is_current "$expected_hash"; then
+    if bootstrap_state_is_current \
+        "$expected_hash" \
+        "$BOOTSTRAP_PLAN_CONTEXT_TARGET_USER" \
+        "$BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME" \
+        "$BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER" \
+        "$BOOTSTRAP_PLAN_CONTEXT_EXECUTION" \
+        "$BOOTSTRAP_PLAN_CONTEXT_FRONTEND"; then
         while IFS= read -r action; do
             [ -n "$action" ] && completed_actions+=("$action")
-        done < <(bootstrap_state_completed_actions "$expected_hash")
+        done < <(bootstrap_state_completed_actions \
+            "$expected_hash" \
+            "$BOOTSTRAP_PLAN_CONTEXT_TARGET_USER" \
+            "$BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME" \
+            "$BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER" \
+            "$BOOTSTRAP_PLAN_CONTEXT_EXECUTION" \
+            "$BOOTSTRAP_PLAN_CONTEXT_FRONTEND")
     fi
 
     BOOTSTRAP_PLAN_COMPLETED=("${completed_actions[@]}")
@@ -252,7 +283,7 @@ bootstrap_plan_emit_text() {
     done
 }
 
-bootstrap_plan_emit_json() {
+bootstrap_plan_emit_json_unsigned() {
     local action deps_json deps status privilege
     local completed_flag execute_flag forced_flag
     local first=true
@@ -326,44 +357,142 @@ EOF
     printf '\n  ]\n}\n'
 }
 
+bootstrap_plan_verify_signature() {
+    local secret expected_signature actual_signature
+
+    actual_signature="${BOOTSTRAP_PLAN_SIGNATURE:-}"
+    if [ -z "$actual_signature" ]; then
+        printf 'Saved plan is missing a signature\n' >&2
+        return 4
+    fi
+
+    secret="$(bootstrap_integrity_load_secret)" || return $?
+    expected_signature="$(printf '%s' "$(bootstrap_plan_emit_json_unsigned)" | bootstrap_json_canonical_signature "$secret")"
+
+    if [ "$expected_signature" != "$actual_signature" ]; then
+        printf 'Saved plan signature does not match the canonical payload\n' >&2
+        return 4
+    fi
+
+    return 0
+}
+
+bootstrap_plan_emit_json() {
+    local payload secret
+
+    payload="$(bootstrap_plan_emit_json_unsigned)"
+    secret="$(bootstrap_integrity_load_secret)"
+    printf '%s' "$payload" | bootstrap_json_sign_canonical "$secret"
+}
+
 bootstrap_plan_from_json_file() {
     local plan_file="$1"
-    local parsed
+    local key kind value count i
+    local -a values=()
+    local parsed_file
+    local signature_file
 
     bootstrap_plan_reset
+    signature_file="$(bootstrap_integrity_secret_file)"
 
-    parsed="$(python3 - "$plan_file" <<'PY'
+    parsed_file="$(mktemp)"
+    if ! python3 - "$plan_file" "$signature_file" >"$parsed_file" <<'PY'
 import json, sys
+import hashlib
+import hmac
 
 plan = json.load(open(sys.argv[1], 'r', encoding='utf-8'))
+secret = open(sys.argv[2], 'r', encoding='utf-8').read().strip()
+
+if not secret:
+    raise SystemExit(1)
+
+signature = plan.get('signature', '')
+if not signature:
+    raise SystemExit(1)
+
+payload = dict(plan)
+payload.pop('signature', None)
+canonical = json.dumps(payload, indent=2, separators=(', ', ': '), ensure_ascii=False)
+expected_signature = hmac.new(secret.encode('utf-8'), canonical.encode('utf-8'), hashlib.sha256).hexdigest()
+
+if signature != expected_signature:
+    raise SystemExit(1)
+
+def emit_scalar(key, value):
+    sys.stdout.buffer.write(key.encode('utf-8'))
+    sys.stdout.buffer.write(b'\0')
+    sys.stdout.buffer.write(b'scalar')
+    sys.stdout.buffer.write(b'\0')
+    sys.stdout.buffer.write(str(value).encode('utf-8'))
+    sys.stdout.buffer.write(b'\0')
+
+def emit_array(key, values):
+    sys.stdout.buffer.write(key.encode('utf-8'))
+    sys.stdout.buffer.write(b'\0')
+    sys.stdout.buffer.write(b'array')
+    sys.stdout.buffer.write(b'\0')
+    sys.stdout.buffer.write(str(len(values)).encode('utf-8'))
+    sys.stdout.buffer.write(b'\0')
+    for item in values:
+        sys.stdout.buffer.write(str(item).encode('utf-8'))
+        sys.stdout.buffer.write(b'\0')
 
 context = plan.get('context', {})
-for key in ('target_user', 'target_home', 'effective_user', 'execution_context', 'frontend'):
-    print(f"context_{key}=" + str(context.get(key, '')))
+emit_scalar('context_target_user', context.get('target_user', ''))
+emit_scalar('context_target_home', context.get('target_home', ''))
+emit_scalar('context_effective_user', context.get('effective_user', ''))
+emit_scalar('context_execution_context', context.get('execution_context', ''))
+emit_scalar('context_frontend', context.get('frontend', ''))
 selection = plan.get('selection', {})
-for key in ('only', 'skip', 'force'):
-    values = selection.get(key, plan.get(key, []))
-    print(f"{key}=" + ",".join(values))
-for key in ('ordered', 'execute', 'completed'):
-    values = plan.get(key, [])
-    print(f"{key}=" + ",".join(values))
-print(f"catalog_hash=" + str(plan.get('catalog_hash', '')))
+emit_array('only', selection.get('only', plan.get('only', [])))
+emit_array('skip', selection.get('skip', plan.get('skip', [])))
+emit_array('force', selection.get('force', plan.get('force', [])))
+emit_array('ordered', plan.get('ordered', []))
+emit_array('execute', plan.get('execute', []))
+emit_array('completed', plan.get('completed', []))
+emit_scalar('catalog_hash', plan.get('catalog_hash', ''))
+emit_scalar('signature', plan.get('signature', ''))
 PY
-)"
+    then
+        rm -f "$parsed_file"
+        return 1
+    fi
 
-    while IFS='=' read -r key value; do
-        case "$key" in
-            context_target_user) BOOTSTRAP_PLAN_CONTEXT_TARGET_USER="$value" ;;
-            context_target_home) BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME="$value" ;;
-            context_effective_user) BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER="$value" ;;
-            context_execution_context) BOOTSTRAP_PLAN_CONTEXT_EXECUTION="$value" ;;
-            context_frontend) BOOTSTRAP_PLAN_CONTEXT_FRONTEND="$value" ;;
-            catalog_hash) BOOTSTRAP_PLAN_CATALOG_HASH="$value" ;;
-            only|skip|force|ordered|execute|completed) bootstrap_plan_assign_csv_field "$key" "$value" ;;
+    while IFS= read -r -d '' key && IFS= read -r -d '' kind; do
+        case "$kind" in
+            scalar)
+                IFS= read -r -d '' value || { rm -f "$parsed_file"; return 1; }
+                case "$key" in
+                    context_target_user) BOOTSTRAP_PLAN_CONTEXT_TARGET_USER="$value" ;;
+                    context_target_home) BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME="$value" ;;
+                    context_effective_user) BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER="$value" ;;
+                    context_execution_context) BOOTSTRAP_PLAN_CONTEXT_EXECUTION="$value" ;;
+                    context_frontend) BOOTSTRAP_PLAN_CONTEXT_FRONTEND="$value" ;;
+                    catalog_hash) BOOTSTRAP_PLAN_CATALOG_HASH="$value" ;;
+                    signature) BOOTSTRAP_PLAN_SIGNATURE="$value" ;;
+                esac
+                ;;
+            array)
+                IFS= read -r -d '' count || { rm -f "$parsed_file"; return 1; }
+                values=()
+                for ((i = 0; i < count; i++)); do
+                    IFS= read -r -d '' value || { rm -f "$parsed_file"; return 1; }
+                    values+=("$value")
+                done
+                case "$key" in
+                    only) BOOTSTRAP_PLAN_ONLY=("${values[@]}") ;;
+                    skip) BOOTSTRAP_PLAN_SKIP=("${values[@]}") ;;
+                    force) BOOTSTRAP_PLAN_FORCE=("${values[@]}") ;;
+                    ordered) BOOTSTRAP_PLAN_ORDERED=("${values[@]}") ;;
+                    execute) BOOTSTRAP_PLAN_EXECUTE=("${values[@]}") ;;
+                    completed) BOOTSTRAP_PLAN_COMPLETED=("${values[@]}") ;;
+                esac
+                ;;
         esac
-    done <<EOF
-$parsed
-EOF
+    done <"$parsed_file"
+
+    rm -f "$parsed_file"
 }
 
 bootstrap_plan_enforce_context() {
@@ -371,23 +500,37 @@ bootstrap_plan_enforce_context() {
     local recorded_target_home="${BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME:-}"
     local recorded_effective_user="${BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER:-}"
     local recorded_execution_context="${BOOTSTRAP_PLAN_CONTEXT_EXECUTION:-}"
-    local current_effective_user current_execution_context
+    local current_target_user current_target_home current_effective_user current_execution_context
 
     if [ -z "$recorded_target_user" ] || [ -z "$recorded_target_home" ] || [ -z "$recorded_effective_user" ] || [ -z "$recorded_execution_context" ]; then
         printf 'Saved plan is missing recorded execution context\n' >&2
         return 4
     fi
 
+    current_target_user="$(bootstrap_target_user)"
+    current_target_home="$(bootstrap_target_home)"
     current_effective_user="$(bootstrap_effective_user)"
     current_execution_context="$(bootstrap_execution_context)"
 
-    if [ "$recorded_effective_user" != "$current_effective_user" ] || [ "$recorded_execution_context" != "$current_execution_context" ]; then
-        printf 'Saved plan context does not match the current shell context\n' >&2
+    if [ "$recorded_target_user" != "$current_target_user" ] || [ "$recorded_target_home" != "$current_target_home" ] || [ "$recorded_effective_user" != "$current_effective_user" ] || [ "$recorded_execution_context" != "$current_execution_context" ]; then
+        printf 'Saved plan context does not match the current execution identity\n' >&2
         return 4
     fi
+}
 
-    BOOTSTRAP_TARGET_USER="$recorded_target_user"
-    BOOTSTRAP_TARGET_HOME="$recorded_target_home"
+bootstrap_plan_revalidate_saved_replay() {
+    local expected_ordered_csv="$1"
+    local expected_execute_csv="$2"
+    local actual_ordered_csv
+    local actual_execute_csv
+
+    actual_ordered_csv="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_ORDERED[@]}")"
+    actual_execute_csv="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_EXECUTE[@]}")"
+
+    if [ "$expected_ordered_csv" != "$actual_ordered_csv" ] || [ "$expected_execute_csv" != "$actual_execute_csv" ]; then
+        printf 'Saved plan replay does not match the deterministic planner result\n' >&2
+        return 4
+    fi
 }
 
 bootstrap_list_emit_text() {
@@ -395,18 +538,37 @@ bootstrap_list_emit_text() {
     local action deps_text status privilege
     local deps=()
     local completed=()
+    local current_target_user current_target_home current_effective_user current_execution_context current_frontend
+
+    current_target_user="$(bootstrap_target_user)"
+    current_target_home="$(bootstrap_target_home)"
+    current_effective_user="$(bootstrap_effective_user)"
+    current_execution_context="$(bootstrap_execution_context)"
+    current_frontend="${BOOTSTRAP_FRONTEND_MODE:-list}"
 
     expected_hash="$(bootstrap_catalog_hash)"
-    if bootstrap_state_is_current "$expected_hash"; then
+    if bootstrap_state_is_current \
+        "$expected_hash" \
+        "$current_target_user" \
+        "$current_target_home" \
+        "$current_effective_user" \
+        "$current_execution_context" \
+        "$current_frontend"; then
         while IFS= read -r action; do
             [ -n "$action" ] && completed+=("$action")
-        done < <(bootstrap_state_completed_actions "$expected_hash")
+        done < <(bootstrap_state_completed_actions \
+            "$expected_hash" \
+            "$current_target_user" \
+            "$current_target_home" \
+            "$current_effective_user" \
+            "$current_execution_context" \
+            "$current_frontend")
     fi
 
     printf 'Bootstrap catalog\n'
     printf '  catalog_hash: %s\n' "$expected_hash"
-    printf '  target_user: %s\n' "${BOOTSTRAP_TARGET_USER:-$(bootstrap_target_user)}"
-    printf '  target_home: %s\n' "${BOOTSTRAP_TARGET_HOME:-$(bootstrap_target_home)}"
+    printf '  target_user: %s\n' "$(bootstrap_target_user)"
+    printf '  target_home: %s\n' "$(bootstrap_target_home)"
     printf '  effective_user: %s\n' "$(bootstrap_effective_user)"
     printf '  execution_context: %s\n' "$(bootstrap_execution_context)"
     printf '\nActions\n'
@@ -434,12 +596,31 @@ bootstrap_list_emit_json() {
     local deps=()
     local completed=()
     local first=true
+    local current_target_user current_target_home current_effective_user current_execution_context current_frontend
+
+    current_target_user="$(bootstrap_target_user)"
+    current_target_home="$(bootstrap_target_home)"
+    current_effective_user="$(bootstrap_effective_user)"
+    current_execution_context="$(bootstrap_execution_context)"
+    current_frontend="${BOOTSTRAP_FRONTEND_MODE:-list}"
 
     expected_hash="$(bootstrap_catalog_hash)"
-    if bootstrap_state_is_current "$expected_hash"; then
+    if bootstrap_state_is_current \
+        "$expected_hash" \
+        "$current_target_user" \
+        "$current_target_home" \
+        "$current_effective_user" \
+        "$current_execution_context" \
+        "$current_frontend"; then
         while IFS= read -r action; do
             [ -n "$action" ] && completed+=("$action")
-        done < <(bootstrap_state_completed_actions "$expected_hash")
+        done < <(bootstrap_state_completed_actions \
+            "$expected_hash" \
+            "$current_target_user" \
+            "$current_target_home" \
+            "$current_effective_user" \
+            "$current_execution_context" \
+            "$current_frontend")
     fi
 
     printf '{\n'
@@ -447,8 +628,8 @@ bootstrap_list_emit_json() {
     printf '  "catalog_version": %s,\n' "${BOOTSTRAP_CATALOG_VERSION}"
     printf '  "catalog_hash": %s,\n' "$(bootstrap_json_quote "$expected_hash")"
     printf '  "context": {"target_user": %s, "target_home": %s, "effective_user": %s, "execution_context": %s, "frontend": %s},\n' \
-        "$(bootstrap_json_quote "${BOOTSTRAP_TARGET_USER:-$(bootstrap_target_user)}")" \
-        "$(bootstrap_json_quote "${BOOTSTRAP_TARGET_HOME:-$(bootstrap_target_home)}")" \
+        "$(bootstrap_json_quote "$(bootstrap_target_user)")" \
+        "$(bootstrap_json_quote "$(bootstrap_target_home)")" \
         "$(bootstrap_json_quote "$(bootstrap_effective_user)")" \
         "$(bootstrap_json_quote "$(bootstrap_execution_context)")" \
         "$(bootstrap_json_quote "${BOOTSTRAP_FRONTEND_MODE:-list}")"
