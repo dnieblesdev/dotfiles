@@ -2,12 +2,20 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+source "$SCRIPT_DIR/lib/util.sh"
+source "$SCRIPT_DIR/lib/catalog.sh"
+source "$SCRIPT_DIR/lib/state.sh"
+source "$SCRIPT_DIR/lib/planner.sh"
+
 DOTFILES_REPO="https://github.com/dnieblesdev/dotfiles.git"
 DOTFILES_DIR="$HOME/.dotfiles"
 BACKUP_DIR="$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S)"
+BOOTSTRAP_BREW_BIN=""
 
-APT_PACKAGES=(git curl wget openssh-client build-essential unzip tar file procps)
-PACMAN_PACKAGES=(git curl wget openssh base-devel unzip tar file procps-ng)
+APT_PACKAGES=(git curl wget openssh-client build-essential unzip tar file procps python3)
+PACMAN_PACKAGES=(git curl wget openssh base-devel unzip tar file procps-ng python3)
 BREW_TOOL_SPECS=(
     "eza|eza"
     "bat|bat"
@@ -29,10 +37,6 @@ ok() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m⚠\033[0m %s\n' "$1"; }
 err() { printf '  \033[31m✗\033[0m %s\n' "$1"; }
 
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
 run_privileged() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
@@ -52,7 +56,16 @@ detect_package_manager() {
 }
 
 is_wsl() {
-    grep -qi microsoft /proc/version 2>/dev/null
+    local version=""
+    if [ -r /proc/version ]; then
+        version="$(</proc/version)"
+    fi
+
+    case "$version" in
+        *microsoft*|*Microsoft*) return 0 ;;
+    esac
+
+    return 1
 }
 
 is_linux() {
@@ -75,10 +88,10 @@ find_brew_binary() {
 
     local candidate
     while IFS= read -r candidate; do
-        [ -x "$candidate" ] && {
+        if [ -x "$candidate" ]; then
             printf '%s\n' "$candidate"
             return 0
-        }
+        fi
     done <<EOF
 $(brew_candidates)
 EOF
@@ -146,34 +159,28 @@ bootstrap_homebrew() {
         return 1
     fi
 
-    eval "$("$brew_bin" shellenv)"
-
-    if ! command_exists brew; then
-        warn "brew shellenv did not place brew on PATH. Skipping brew-managed tools."
-        return 1
-    fi
-
+    BOOTSTRAP_BREW_BIN="$brew_bin"
     ok "Homebrew ready"
-    return 0
 }
 
 install_brew_formula() {
     local label="$1"
     local formula="${2:-$1}"
+    local brew_bin="${BOOTSTRAP_BREW_BIN:-}"
 
-    if ! command_exists brew; then
+    if [ -z "$brew_bin" ]; then
         warn "Skipping $label: Homebrew is unavailable"
         return 0
     fi
 
-    if brew list "$formula" >/dev/null 2>&1; then
+    if "$brew_bin" list "$formula" >/dev/null 2>&1; then
         info "$label already installed"
         return 0
     fi
 
     info "Installing $label with Homebrew"
-    if brew install "$formula" >/dev/null 2>&1; then
-        if brew list "$formula" >/dev/null 2>&1; then
+    if "$brew_bin" install "$formula" >/dev/null 2>&1; then
+        if "$brew_bin" list "$formula" >/dev/null 2>&1; then
             ok "$label installed"
         else
             warn "Homebrew finished but $label could not be verified"
@@ -184,7 +191,7 @@ install_brew_formula() {
 }
 
 install_brew_dev_tools() {
-    if ! command_exists brew; then
+    if [ -z "${BOOTSTRAP_BREW_BIN:-}" ]; then
         warn "Homebrew is unavailable; skipping brew-managed developer tools"
         return 0
     fi
@@ -290,46 +297,228 @@ install_rustup_runtime() {
     fi
 }
 
-install_runtimes() {
-    install_nvm_runtime
-    install_uv_runtime
-    install_rustup_runtime
+bootstrap_run_action() {
+    local action="$1"
+
+    case "$action" in
+        system-packages)
+            install_system_packages "$(detect_package_manager || true)"
+            ;;
+        homebrew)
+            bootstrap_homebrew
+            ;;
+        brew-tools)
+            install_brew_dev_tools
+            ;;
+        dotfiles-clone)
+            clone_or_update_dotfiles
+            ;;
+        dotfiles-backup)
+            backup_existing_shell_files
+            ;;
+        dotfiles-link)
+            link_dotfiles
+            ;;
+        runtime-nvm)
+            install_nvm_runtime
+            ;;
+        runtime-uv)
+            install_uv_runtime
+            ;;
+        runtime-rustup)
+            install_rustup_runtime
+            ;;
+        *)
+            err "Unknown action: $action"
+            return 3
+            ;;
+    esac
+}
+
+bootstrap_parse_args() {
+    BOOTSTRAP_COMMAND="apply"
+    BOOTSTRAP_FORMAT="text"
+    BOOTSTRAP_PLAN_FILE=""
+    local -a only=()
+    local -a skip=()
+    local -a force=()
+    local -a positional=()
+
+    case "${1:-}" in
+        plan|apply|list|test|help|-h|--help)
+            BOOTSTRAP_COMMAND="$1"
+            shift || true
+            ;;
+    esac
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --only)
+                only+=("${2:-}")
+                shift 2
+                ;;
+            --only=*)
+                only+=("${1#--only=}")
+                shift
+                ;;
+            --skip)
+                skip+=("${2:-}")
+                shift 2
+                ;;
+            --skip=*)
+                skip+=("${1#--skip=}")
+                shift
+                ;;
+            --force)
+                force+=("${2:-}")
+                shift 2
+                ;;
+            --force=*)
+                force+=("${1#--force=}")
+                shift
+                ;;
+            --format)
+                BOOTSTRAP_FORMAT="${2:-text}"
+                shift 2
+                ;;
+            --format=*)
+                BOOTSTRAP_FORMAT="${1#--format=}"
+                shift
+                ;;
+            --plan)
+                BOOTSTRAP_PLAN_FILE="${2:-}"
+                shift 2
+                ;;
+            --plan=*)
+                BOOTSTRAP_PLAN_FILE="${1#--plan=}"
+                shift
+                ;;
+            --)
+                shift
+                while [ "$#" -gt 0 ]; do
+                    positional+=("$1")
+                    shift
+                done
+                ;;
+            -h|--help)
+                BOOTSTRAP_COMMAND="help"
+                shift
+                ;;
+            *)
+                positional+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [ "$BOOTSTRAP_COMMAND" = "apply" ] && [ "${#positional[@]}" -gt 0 ] && [ "${#only[@]}" -eq 0 ]; then
+        only+=("${positional[@]}")
+    fi
+
+    if [ "$BOOTSTRAP_COMMAND" = "plan" ] && [ "${#positional[@]}" -gt 0 ] && [ "${#only[@]}" -eq 0 ]; then
+        only+=("${positional[@]}")
+    fi
+
+    BOOTSTRAP_ONLY_CSV="$(bootstrap_join_csv "${only[@]}")"
+    BOOTSTRAP_SKIP_CSV="$(bootstrap_join_csv "${skip[@]}")"
+    BOOTSTRAP_FORCE_CSV="$(bootstrap_join_csv "${force[@]}")"
+}
+
+bootstrap_execute_plan() {
+    local action rc
+    local -a completed=()
+
+    for action in "${BOOTSTRAP_PLAN_EXECUTE[@]}"; do
+        printf '\n\033[1m[%s]\033[0m\n' "$action"
+        if bootstrap_run_action "$action"; then
+            completed+=("$action")
+            bootstrap_state_write \
+                "$BOOTSTRAP_CATALOG_HASH" \
+                "partial_success" \
+                "" \
+                0 \
+                "" \
+                "$BOOTSTRAP_ONLY_CSV" \
+                "$BOOTSTRAP_SKIP_CSV" \
+                "$BOOTSTRAP_FORCE_CSV" \
+                "$(bootstrap_join_csv "${BOOTSTRAP_PLAN_ORDERED[@]}")" \
+                "$(bootstrap_join_csv "${BOOTSTRAP_PLAN_EXECUTE[@]}")" \
+                "$(bootstrap_join_csv "${completed[@]}")"
+            continue
+        fi
+
+        rc=$?
+        bootstrap_state_write \
+            "$BOOTSTRAP_CATALOG_HASH" \
+            "partial_failure" \
+            "$action" \
+            "$rc" \
+            "Action failed" \
+            "$BOOTSTRAP_ONLY_CSV" \
+            "$BOOTSTRAP_SKIP_CSV" \
+            "$BOOTSTRAP_FORCE_CSV" \
+            "$(bootstrap_join_csv "${BOOTSTRAP_PLAN_ORDERED[@]}")" \
+            "$(bootstrap_join_csv "${BOOTSTRAP_PLAN_EXECUTE[@]}")" \
+            "$(bootstrap_join_csv "${completed[@]}")"
+        return "$rc"
+    done
+
+    bootstrap_state_write \
+        "$BOOTSTRAP_CATALOG_HASH" \
+        "success" \
+        "" \
+        0 \
+        "" \
+        "$BOOTSTRAP_ONLY_CSV" \
+        "$BOOTSTRAP_SKIP_CSV" \
+        "$BOOTSTRAP_FORCE_CSV" \
+        "$(bootstrap_join_csv "${BOOTSTRAP_PLAN_ORDERED[@]}")" \
+        "$(bootstrap_join_csv "${BOOTSTRAP_PLAN_EXECUTE[@]}")" \
+        "$(bootstrap_join_csv "${completed[@]}")"
+}
+
+bootstrap_command_plan() {
+    bootstrap_parse_args "$@"
+
+    if [ -n "$BOOTSTRAP_PLAN_FILE" ]; then
+        bootstrap_plan_from_json_file "$BOOTSTRAP_PLAN_FILE"
+    fi
+
+    bootstrap_plan_compute "$BOOTSTRAP_ONLY_CSV" "$BOOTSTRAP_SKIP_CSV" "$BOOTSTRAP_FORCE_CSV"
+
+    case "$BOOTSTRAP_FORMAT" in
+        json) bootstrap_plan_emit_json ;;
+        text|*) bootstrap_plan_emit_text ;;
+    esac
+}
+
+bootstrap_command_apply() {
+    bootstrap_parse_args "$@"
+    local current_hash=""
+
+    if [ -n "$BOOTSTRAP_PLAN_FILE" ]; then
+        bootstrap_plan_from_json_file "$BOOTSTRAP_PLAN_FILE"
+        current_hash="$(bootstrap_catalog_hash)"
+        if [ -n "${BOOTSTRAP_PLAN_CATALOG_HASH:-}" ] && [ "$BOOTSTRAP_PLAN_CATALOG_HASH" != "$current_hash" ]; then
+            err "Saved plan catalog hash does not match the current catalog"
+            return 4
+        fi
+
+        BOOTSTRAP_CATALOG_HASH="$current_hash"
+    else
+        bootstrap_plan_compute "$BOOTSTRAP_ONLY_CSV" "$BOOTSTRAP_SKIP_CSV" "$BOOTSTRAP_FORCE_CSV"
+    fi
+    local rc=0
+    if bootstrap_execute_plan; then
+        :
+    else
+        rc=$?
+        return "$rc"
+    fi
 
     if [ ! -d "$HOME/development/flutter" ]; then
         warn "Flutter not detected. If you need it: https://docs.flutter.dev/get-started/install/linux"
     fi
-}
-
-main() {
-    echo ""
-    printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
-    printf '\033[1m  Dotfiles Bootstrap\033[0m\n'
-    printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n\n'
-
-    printf '\033[1m[1/5] System packages\033[0m\n'
-    local package_manager
-    package_manager="$(detect_package_manager || true)"
-    install_system_packages "$package_manager"
-
-    echo ""
-    printf '\033[1m[2/5] Homebrew bootstrap\033[0m\n'
-    if ! bootstrap_homebrew; then
-        warn "Homebrew is not ready; brew-managed tools will be skipped"
-    fi
-
-    echo ""
-    printf '\033[1m[3/5] Brew-managed developer tools\033[0m\n'
-    install_brew_dev_tools
-
-    echo ""
-    printf '\033[1m[4/5] Dotfiles setup\033[0m\n'
-    clone_or_update_dotfiles
-    backup_existing_shell_files
-    link_dotfiles
-
-    echo ""
-    printf '\033[1m[5/5] Runtimes\033[0m\n'
-    install_runtimes
 
     echo ""
     printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
@@ -340,6 +529,117 @@ main() {
     echo "  If you want to switch to Zsh, review the config first: chsh -s \"$(command -v zsh || echo /usr/bin/zsh)\""
     echo "  If something does not work, run: dotlink --list"
     echo
+}
+
+bootstrap_command_list() {
+    bootstrap_parse_args "$@"
+
+    case "$BOOTSTRAP_FORMAT" in
+        json) bootstrap_list_emit_json ;;
+        text|*) bootstrap_list_emit_text ;;
+    esac
+}
+
+bootstrap_self_test() {
+    local temp_dir temp_state
+    temp_dir="$(mktemp -d)"
+    temp_state="$temp_dir/bootstrap-state.json"
+
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
+    if ! bootstrap_array_contains "system-packages" "${BOOTSTRAP_PLAN_ORDERED[@]}"; then
+        err "Expected system-packages in dependency closure"
+        return 1
+    fi
+    if ! bootstrap_array_contains "homebrew" "${BOOTSTRAP_PLAN_ORDERED[@]}"; then
+        err "Expected homebrew in dependency closure"
+        return 1
+    fi
+    if ! bootstrap_array_contains "brew-tools" "${BOOTSTRAP_PLAN_ORDERED[@]}"; then
+        err "Expected brew-tools in dependency closure"
+        return 1
+    fi
+
+    if BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "homebrew" "" >/dev/null 2>&1; then
+        err "Expected skip validation to fail"
+        return 1
+    fi
+
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_state_write \
+        "$(bootstrap_catalog_hash)" \
+        "success" \
+        "" \
+        0 \
+        "" \
+        "system-packages,homebrew" \
+        "" \
+        "" \
+        "system-packages,homebrew,brew-tools" \
+        "brew-tools" \
+        "system-packages,homebrew"
+
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
+    if ! bootstrap_array_contains "brew-tools" "${BOOTSTRAP_PLAN_EXECUTE[@]}"; then
+        err "Expected brew-tools to remain scheduled"
+        return 1
+    fi
+
+    rm -rf "$temp_dir"
+    ok "Bootstrap planner self-test passed"
+}
+
+main() {
+    echo ""
+    printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+    printf '\033[1m  Dotfiles Bootstrap\033[0m\n'
+    printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n\n'
+
+    case "${1:-}" in
+        plan|apply|list|test|help|-h|--help)
+            ;;
+        "")
+            set -- apply
+            ;;
+        *)
+            set -- apply "$@"
+            ;;
+    esac
+
+    case "${1:-}" in
+        plan)
+            shift
+            bootstrap_command_plan "$@"
+            ;;
+        apply)
+            shift
+            bootstrap_command_apply "$@"
+            ;;
+        list)
+            shift
+            bootstrap_command_list "$@"
+            ;;
+        test)
+            shift
+            bootstrap_self_test "$@"
+            ;;
+        help|-h|--help)
+            cat <<'EOF'
+Usage: bootstrap/install.sh [plan|apply|list|test] [selectors]
+
+Commands:
+  plan   Compute a deterministic bootstrap plan
+  apply  Compute and execute a bootstrap plan (default)
+  list   List the catalog and current advisory status
+  test   Run planner self-checks
+
+Selectors:
+  --only ACTION[,ACTION...]
+  --skip ACTION[,ACTION...]
+  --force ACTION[,ACTION...]
+  --format text|json
+  --plan FILE
+EOF
+            ;;
+    esac
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
