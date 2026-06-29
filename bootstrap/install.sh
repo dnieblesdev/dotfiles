@@ -426,12 +426,14 @@ bootstrap_parse_args() {
 
 bootstrap_execute_plan() {
     local action rc
-    local -a completed=()
+    local -a completed=("${BOOTSTRAP_PLAN_COMPLETED[@]}")
 
     for action in "${BOOTSTRAP_PLAN_EXECUTE[@]}"; do
         printf '\n\033[1m[%s]\033[0m\n' "$action"
         if bootstrap_run_action "$action"; then
-            completed+=("$action")
+            if ! bootstrap_array_contains "$action" "${completed[@]}"; then
+                completed+=("$action")
+            fi
             bootstrap_state_write \
                 "$BOOTSTRAP_CATALOG_HASH" \
                 "partial_success" \
@@ -499,12 +501,19 @@ bootstrap_command_apply() {
     if [ -n "$BOOTSTRAP_PLAN_FILE" ]; then
         bootstrap_plan_from_json_file "$BOOTSTRAP_PLAN_FILE"
         current_hash="$(bootstrap_catalog_hash)"
-        if [ -n "${BOOTSTRAP_PLAN_CATALOG_HASH:-}" ] && [ "$BOOTSTRAP_PLAN_CATALOG_HASH" != "$current_hash" ]; then
+        if [ -z "${BOOTSTRAP_PLAN_CATALOG_HASH:-}" ]; then
+            err "Saved plan is missing a catalog hash"
+            return 4
+        fi
+        if [ "$BOOTSTRAP_PLAN_CATALOG_HASH" != "$current_hash" ]; then
             err "Saved plan catalog hash does not match the current catalog"
             return 4
         fi
 
         BOOTSTRAP_CATALOG_HASH="$current_hash"
+        BOOTSTRAP_ONLY_CSV="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_ONLY[@]}")"
+        BOOTSTRAP_SKIP_CSV="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_SKIP[@]}")"
+        BOOTSTRAP_FORCE_CSV="$(bootstrap_join_csv "${BOOTSTRAP_PLAN_FORCE[@]}")"
     else
         bootstrap_plan_compute "$BOOTSTRAP_ONLY_CSV" "$BOOTSTRAP_SKIP_CSV" "$BOOTSTRAP_FORCE_CSV"
     fi
@@ -541,9 +550,17 @@ bootstrap_command_list() {
 }
 
 bootstrap_self_test() {
-    local temp_dir temp_state
+    local temp_dir temp_state temp_plan temp_stale_plan
+    local -a executed_actions=()
     temp_dir="$(mktemp -d)"
     temp_state="$temp_dir/bootstrap-state.json"
+    temp_plan="$temp_dir/bootstrap-plan.json"
+    temp_stale_plan="$temp_dir/bootstrap-plan-stale.json"
+
+    bootstrap_run_action() {
+        executed_actions+=("$1")
+        return 0
+    }
 
     BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
     if ! bootstrap_array_contains "system-packages" "${BOOTSTRAP_PLAN_ORDERED[@]}"; then
@@ -580,6 +597,65 @@ bootstrap_self_test() {
     BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
     if ! bootstrap_array_contains "brew-tools" "${BOOTSTRAP_PLAN_EXECUTE[@]}"; then
         err "Expected brew-tools to remain scheduled"
+        return 1
+    fi
+
+    cat >"$temp_plan" <<EOF
+{
+  "schema_version": 1,
+  "catalog_version": 1,
+  "catalog_hash": $(bootstrap_json_quote "$(bootstrap_catalog_hash)"),
+  "selection": {
+    "only": ["brew-tools"],
+    "skip": [],
+    "force": []
+  },
+  "ordered": ["system-packages", "homebrew", "brew-tools"],
+  "execute": ["brew-tools"],
+  "completed": ["system-packages", "homebrew"]
+}
+EOF
+
+    executed_actions=()
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_command_apply --plan "$temp_plan" >/dev/null 2>&1
+    if [ "$(bootstrap_join_csv "${executed_actions[@]}")" != "brew-tools" ]; then
+        err "Expected saved plan execution to honor the persisted execute list"
+        return 1
+    fi
+
+    python3 - "$temp_state" <<'PY'
+import json, sys
+
+state = json.load(open(sys.argv[1], 'r', encoding='utf-8'))
+assert state['selection']['only'] == ['brew-tools'], state['selection']
+assert state['plan']['ordered'] == ['system-packages', 'homebrew', 'brew-tools'], state['plan']
+assert state['plan']['execute'] == ['brew-tools'], state['plan']
+assert state['completed_actions'] == ['system-packages', 'homebrew', 'brew-tools'], state['completed_actions']
+PY
+
+    cat >"$temp_stale_plan" <<EOF
+{
+  "schema_version": 1,
+  "catalog_version": 1,
+  "catalog_hash": "stale-catalog-hash",
+  "selection": {
+    "only": ["brew-tools"],
+    "skip": [],
+    "force": []
+  },
+  "ordered": ["system-packages", "homebrew", "brew-tools"],
+  "execute": ["brew-tools"],
+  "completed": ["system-packages", "homebrew"]
+}
+EOF
+
+    executed_actions=()
+    if BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_command_apply --plan "$temp_stale_plan" >/dev/null 2>&1; then
+        err "Expected stale saved plan to be rejected"
+        return 1
+    fi
+    if [ -n "$(bootstrap_join_csv "${executed_actions[@]}")" ]; then
+        err "Expected stale saved plan rejection before any actions ran"
         return 1
     fi
 
