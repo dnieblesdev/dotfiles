@@ -9,7 +9,7 @@ Bash remains the compatibility/base layer. Zsh is an optional interactive person
 ## Current status
 
 The bootstrap is shell-first, supports selective reruns, and keeps advisory state under `$XDG_STATE_HOME`.
-The remaining security hardening work is documented in [`docs/bootstrap.md`](docs/bootstrap.md).
+The remaining security hardening work is documented in [`docs/installer.md`](docs/installer.md).
 An optional Go controller can present shell-owned choices, but it is never required for bootstrap.
 
 ## Quick install
@@ -23,19 +23,19 @@ git clone https://github.com/dnieblesdev/dotfiles.git ~/.dotfiles
 Link the active dotfiles:
 
 ```bash
-~/.dotfiles/bootstrap/dotlink bash git
+~/.dotfiles/installer/dotlink bash git
 ```
 
 Link the optional Zsh interactive layer and Starship config:
 
 ```bash
-~/.dotfiles/bootstrap/dotlink zsh config
+~/.dotfiles/installer/dotlink zsh config
 ```
 
 Or run the full bootstrap:
 
 ```bash
-~/.dotfiles/bootstrap/install.sh
+~/.dotfiles/installer/install.sh
 ```
 
 ## Bootstrap order
@@ -65,7 +65,7 @@ Privilege handling is per action: the bootstrap warns once when running as root,
 | `git/` | Git configuration linked into `$HOME` |
 | `wsl/` | WSL-specific environment and functions |
 | `linux/` | Native Linux-specific environment and functions |
-| `bootstrap/` | Installation and linking scripts |
+| `installer/` | Installation and linking scripts |
 
 ## dotlink
 
@@ -74,15 +74,15 @@ Privilege handling is per action: the bootstrap warns once when running as root,
 It links dotfiles from module folders into `$HOME`:
 
 ```bash
-~/.dotfiles/bootstrap/dotlink bash git
+~/.dotfiles/installer/dotlink bash git
 ```
 
 Useful commands:
 
 ```bash
-~/.dotfiles/bootstrap/dotlink --list
-~/.dotfiles/bootstrap/dotlink --dry-run bash git
-~/.dotfiles/bootstrap/dotlink --delete bash
+~/.dotfiles/installer/dotlink --list
+~/.dotfiles/installer/dotlink --dry-run bash git
+~/.dotfiles/installer/dotlink --delete bash
 ```
 
 `dotlink` also supports nested dot directories such as `.config/`. It creates the parent directory in `$HOME` as a real directory, then links children individually, so `config/.config/starship.toml` links to `~/.config/starship.toml` without symlinking the whole `~/.config` directory.
@@ -111,13 +111,13 @@ Runtime managers stay separate from Brew:
 Install and link everything with the bootstrap:
 
 ```bash
-~/.dotfiles/bootstrap/install.sh
+~/.dotfiles/installer/install.sh
 ```
 
 Or link only the Zsh layer after cloning:
 
 ```bash
-~/.dotfiles/bootstrap/dotlink zsh config
+~/.dotfiles/installer/dotlink zsh config
 ```
 
 The expected links are:
@@ -153,7 +153,7 @@ This keeps dotfiles portable while allowing each OS to store and build projects 
 - Existing `.bashrc` and `.gitconfig` files should be backed up before linking.
 - Secrets, tokens, `.env` files, and private keys do not belong in this repository.
 - Run `dotlink --dry-run` before linking on a new machine.
-- If you need a deeper view of the bootstrap contract, read [`docs/bootstrap.md`](docs/bootstrap.md).
+- If you need a deeper view of the bootstrap contract, read [`docs/installer.md`](docs/installer.md).
 
 ## Current links
 
