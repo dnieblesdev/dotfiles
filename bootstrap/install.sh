@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "$SCRIPT_DIR/lib/util.sh"
 source "$SCRIPT_DIR/lib/catalog.sh"
+source "$SCRIPT_DIR/lib/controller.sh"
 source "$SCRIPT_DIR/lib/state.sh"
 source "$SCRIPT_DIR/lib/planner.sh"
 
@@ -597,7 +598,7 @@ bootstrap_parse_args() {
     local -a positional=()
 
     case "${1:-}" in
-        plan|apply|list|test|help|-h|--help)
+        plan|apply|list|controller|test|help|-h|--help)
             BOOTSTRAP_COMMAND="$1"
             shift || true
             ;;
@@ -820,6 +821,10 @@ bootstrap_command_list() {
         json) bootstrap_list_emit_json ;;
         text|*) bootstrap_list_emit_text ;;
     esac
+}
+
+bootstrap_command_controller() {
+    bootstrap_controller_handle_request
 }
 
 bootstrap_self_test() {
@@ -1919,11 +1924,18 @@ main() {
         BOOTSTRAP_TEST_MODE_ACTIVE=1
         BOOTSTRAP_TEST_MODE=1
     fi
-    bootstrap_show_startup_context "${BOOTSTRAP_COMMAND:-apply}"
-    echo
+
+    if [ "${BOOTSTRAP_COMMAND:-apply}" != controller ]; then
+        echo ""
+        printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
+        printf '\033[1m  Dotfiles Bootstrap\033[0m\n'
+        printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n\n'
+        bootstrap_show_startup_context "${BOOTSTRAP_COMMAND:-apply}"
+        echo
+    fi
 
     case "${1:-}" in
-        plan|apply|list|test|help|-h|--help)
+        plan|apply|list|controller|test|help|-h|--help)
             ;;
         "")
             set -- apply
@@ -1946,18 +1958,23 @@ main() {
             shift
             bootstrap_command_list "$@"
             ;;
+        controller)
+            shift
+            bootstrap_command_controller "$@"
+            ;;
         test)
             shift
             bootstrap_self_test "$@"
             ;;
         help|-h|--help)
             cat <<'EOF'
-Usage: bootstrap/install.sh [plan|apply|list|test] [selectors]
+Usage: bootstrap/install.sh [plan|apply|list|controller|test] [selectors]
 
 Commands:
   plan   Compute a deterministic bootstrap plan
   apply  Compute and execute a bootstrap plan (default)
   list   List the catalog and current advisory status
+  controller  Respond to an optional Go controller handshake request
   test   Run planner self-checks
 
 Selectors:

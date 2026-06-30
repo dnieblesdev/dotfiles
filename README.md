@@ -6,6 +6,12 @@ This repository keeps shell configuration, environment paths, Git configuration,
 
 Bash remains the compatibility/base layer. Zsh is an optional interactive personalization layer with lightweight tools and no Oh My Zsh dependency.
 
+## Current status
+
+The bootstrap is shell-first, supports selective reruns, and keeps advisory state under `$XDG_STATE_HOME`.
+The remaining security hardening work is documented in [`docs/bootstrap.md`](docs/bootstrap.md).
+An optional Go controller can present shell-owned choices, but it is never required for bootstrap.
+
 ## Quick install
 
 Clone the repository:
@@ -42,8 +48,11 @@ The bootstrap now follows a strict split:
 4. Runtime managers kept separate from Brew: `nvm`, `uv`, and `rustup`
 
 If Homebrew is missing or fails to install, the bootstrap warns clearly and skips only the brew-managed layer.
+The optional Go frontend uses a versioned handshake and falls back to the shell path when it is missing or outdated.
 
 Install `zsh` separately if your distro does not already provide it.
+
+Privilege handling is per action: the bootstrap warns once when running as root, requests explicit confirmation, and keeps Brew-managed apps/tools user-owned by default. System-package installs are the only elevated phase by design.
 
 ## Structure
 
@@ -144,6 +153,7 @@ This keeps dotfiles portable while allowing each OS to store and build projects 
 - Existing `.bashrc` and `.gitconfig` files should be backed up before linking.
 - Secrets, tokens, `.env` files, and private keys do not belong in this repository.
 - Run `dotlink --dry-run` before linking on a new machine.
+- If you need a deeper view of the bootstrap contract, read [`docs/bootstrap.md`](docs/bootstrap.md).
 
 ## Current links
 
