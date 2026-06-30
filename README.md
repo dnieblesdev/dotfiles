@@ -38,6 +38,21 @@ Or run the full bootstrap:
 ~/.dotfiles/installer/install.sh
 ```
 
+Launch the optional Go controller/TUI instead (auto-installs Go user-locally if needed, then builds and execs `bootstrap-controller`):
+
+```bash
+~/.dotfiles/installer/install.sh tui
+```
+
+Pass any controller flag through the launcher:
+
+```bash
+~/.dotfiles/installer/install.sh tui --help
+~/.dotfiles/installer/install.sh tui --only brew-tools
+```
+
+The `tui` subcommand is opt-in. Running `install.sh` with no arguments still runs the default shell bootstrap. Override the Go version with `BOOTSTRAP_TUI_GO_VERSION` (default: `1.23.4`) before launching the TUI for the first time.
+
 ## Bootstrap order
 
 The bootstrap now follows a strict split:
@@ -48,7 +63,7 @@ The bootstrap now follows a strict split:
 4. Runtime managers kept separate from Brew: `nvm`, `uv`, and `rustup`
 
 If Homebrew is missing or fails to install, the bootstrap warns clearly and skips only the brew-managed layer.
-The optional Go frontend uses a versioned handshake and falls back to the shell path when it is missing or outdated.
+The optional Go controller is launched explicitly with `bash installer/install.sh tui`, which auto-installs Go user-locally and builds the binary before exec'ing it.
 
 Install `zsh` separately if your distro does not already provide it.
 

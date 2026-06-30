@@ -8,6 +8,7 @@ This repository now has a shell-first bootstrap that can restore a machine from 
 2. Run `~/.dotfiles/installer/install.sh`.
 3. Use `plan`, `list`, or `apply` to re-run selected actions later.
 4. Link optional shell layers with `dotlink` when needed.
+5. Launch the optional Go controller with `~/.dotfiles/installer/install.sh tui` (auto-installs Go user-locally if needed).
 
 ## Details
 
@@ -33,6 +34,7 @@ Completed in this slice:
 
 - explicit confirmation now gates sudo-mediated privileged dispatch
 - privileged child launches use a trusted fixed PATH allowlist
+- `tui` subcommand now launches the Go controller with an auto-installing Go toolchain
 
 ## Checklist
 
@@ -44,12 +46,24 @@ Completed in this slice:
 
 ## Next step
 
-Optional Go frontend slice: a thin TUI/controller that only selects actions and emits the existing shell contract.
+Harden the `tui` launcher for offline Go installation and signed bootstrap-controller builds.
 
 ## Optional Go path
 
-The Go controller is opt-in. It first handshakes with `installer/install.sh controller`, then reads the shell-owned catalog via `installer/install.sh list --format json`, and finally calls `installer/install.sh apply`.
+The Go controller is opt-in and is launched by the shell with the `tui` subcommand.
 
-If the Go binary is missing, outdated, or the shell handshake fails, the flow falls back to the shell bootstrap directly.
+```bash
+bash installer/install.sh tui                 # auto-installs Go user-locally and exec's the controller
+bash installer/install.sh tui --only brew-tools  # forwards --only to bootstrap-controller
+bash installer/install.sh tui --help          # shows the controller's flag usage
+```
 
-Building or testing the optional Go controller locally requires Go 1.23+.
+The launcher:
+
+1. Detects Go via `command -v go`. If missing, it installs Go user-locally at `~/.local/go` from the official go.dev tarball and symlinks `go` and `gofmt` into `~/.local/bin`. No sudo, no system package manager.
+2. Builds `bootstrap-controller` from `cmd/bootstrap-controller/` into `~/.local/bin/bootstrap-controller` if the binary is missing or older than its sources. The build is skipped when the binary is already up-to-date.
+3. `exec`s `bootstrap-controller`, forwarding every arg after `tui`. The controller then handshakes with `installer/install.sh controller`, reads the shell-owned catalog via `installer/install.sh list --format json`, and finally calls `installer/install.sh apply`.
+
+Default Go version is `1.23.4`. Override with `BOOTSTRAP_TUI_GO_VERSION` before the first `tui` invocation. The default `install.sh` (no args or `apply`) is unchanged — `tui` is opt-in and never modifies the shell bootstrap path.
+
+Building or testing the optional Go controller locally still requires Go 1.23+ when developing it directly. End users do not need a pre-existing Go toolchain.
