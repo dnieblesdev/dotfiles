@@ -2302,7 +2302,7 @@ main() {
         BOOTSTRAP_TEST_MODE=1
     fi
 
-    if [ "${BOOTSTRAP_COMMAND:-apply}" != controller ] && [ "${BOOTSTRAP_COMMAND:-apply}" != tui ]; then
+    if [ "${BOOTSTRAP_COMMAND:-apply}" != controller ] && [ "${BOOTSTRAP_COMMAND:-apply}" != tui ] && [ "${BOOTSTRAP_FORMAT:-text}" != json ]; then
         echo ""
         printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
         printf '\033[1m  Dotfiles Bootstrap\033[0m\n'
