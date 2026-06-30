@@ -162,15 +162,20 @@ bootstrap_plan_compute() {
         "$BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER" \
         "$BOOTSTRAP_PLAN_CONTEXT_EXECUTION" \
         "$BOOTSTRAP_PLAN_CONTEXT_FRONTEND"; then
-        while IFS= read -r action; do
-            [ -n "$action" ] && completed_actions+=("$action")
-        done < <(bootstrap_state_completed_actions \
+        local completed_actions_output
+        if ! completed_actions_output="$(bootstrap_state_completed_actions \
             "$expected_hash" \
             "$BOOTSTRAP_PLAN_CONTEXT_TARGET_USER" \
             "$BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME" \
             "$BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER" \
             "$BOOTSTRAP_PLAN_CONTEXT_EXECUTION" \
-            "$BOOTSTRAP_PLAN_CONTEXT_FRONTEND")
+            "$BOOTSTRAP_PLAN_CONTEXT_FRONTEND")"; then
+            return 4
+        fi
+
+        while IFS= read -r action; do
+            [ -n "$action" ] && completed_actions+=("$action")
+        done <<<"$completed_actions_output"
     fi
 
     BOOTSTRAP_PLAN_COMPLETED=("${completed_actions[@]}")
@@ -396,13 +401,18 @@ bootstrap_plan_from_json_file() {
     signature_file="$(bootstrap_integrity_secret_file)"
 
     parsed_file="$(mktemp)"
-    if ! python3 - "$plan_file" "$signature_file" >"$parsed_file" <<'PY'
+    if ! python3 - "$plan_file" "$signature_file" "$BOOTSTRAP_SCHEMA_VERSION" "$BOOTSTRAP_CATALOG_VERSION" >"$parsed_file" <<'PY'
 import json, sys
 import hashlib
 import hmac
 
 plan = json.load(open(sys.argv[1], 'r', encoding='utf-8'))
 secret = open(sys.argv[2], 'r', encoding='utf-8').read().strip()
+expected_schema_version = int(sys.argv[3])
+expected_catalog_version = int(sys.argv[4])
+
+if not isinstance(plan, dict):
+    raise SystemExit(1)
 
 if not secret:
     raise SystemExit(1)
@@ -417,6 +427,12 @@ canonical = json.dumps(payload, indent=2, separators=(', ', ': '), ensure_ascii=
 expected_signature = hmac.new(secret.encode('utf-8'), canonical.encode('utf-8'), hashlib.sha256).hexdigest()
 
 if signature != expected_signature:
+    raise SystemExit(1)
+
+if plan.get('schema_version') != expected_schema_version:
+    raise SystemExit(1)
+
+if plan.get('catalog_version') != expected_catalog_version:
     raise SystemExit(1)
 
 def emit_scalar(key, value):
@@ -500,9 +516,10 @@ bootstrap_plan_enforce_context() {
     local recorded_target_home="${BOOTSTRAP_PLAN_CONTEXT_TARGET_HOME:-}"
     local recorded_effective_user="${BOOTSTRAP_PLAN_CONTEXT_EFFECTIVE_USER:-}"
     local recorded_execution_context="${BOOTSTRAP_PLAN_CONTEXT_EXECUTION:-}"
-    local current_target_user current_target_home current_effective_user current_execution_context
+    local recorded_frontend="${BOOTSTRAP_PLAN_CONTEXT_FRONTEND:-}"
+    local current_target_user current_target_home current_effective_user current_execution_context current_frontend
 
-    if [ -z "$recorded_target_user" ] || [ -z "$recorded_target_home" ] || [ -z "$recorded_effective_user" ] || [ -z "$recorded_execution_context" ]; then
+    if [ -z "$recorded_target_user" ] || [ -z "$recorded_target_home" ] || [ -z "$recorded_effective_user" ] || [ -z "$recorded_execution_context" ] || [ -z "$recorded_frontend" ]; then
         printf 'Saved plan is missing recorded execution context\n' >&2
         return 4
     fi
@@ -511,9 +528,26 @@ bootstrap_plan_enforce_context() {
     current_target_home="$(bootstrap_target_home)"
     current_effective_user="$(bootstrap_effective_user)"
     current_execution_context="$(bootstrap_execution_context)"
+    current_frontend="${BOOTSTRAP_FRONTEND_MODE:-unknown}"
 
-    if [ "$recorded_target_user" != "$current_target_user" ] || [ "$recorded_target_home" != "$current_target_home" ] || [ "$recorded_effective_user" != "$current_effective_user" ] || [ "$recorded_execution_context" != "$current_execution_context" ]; then
-        printf 'Saved plan context does not match the current execution identity\n' >&2
+    if [ "$recorded_target_user" != "$current_target_user" ]; then
+        printf 'Saved plan context does not match: field=target_user expected=%s current=%s\n' "$recorded_target_user" "$current_target_user" >&2
+        return 4
+    fi
+    if [ "$recorded_target_home" != "$current_target_home" ]; then
+        printf 'Saved plan context does not match: field=target_home expected=%s current=%s\n' "$recorded_target_home" "$current_target_home" >&2
+        return 4
+    fi
+    if [ "$recorded_effective_user" != "$current_effective_user" ]; then
+        printf 'Saved plan context does not match: field=effective_user expected=%s current=%s\n' "$recorded_effective_user" "$current_effective_user" >&2
+        return 4
+    fi
+    if [ "$recorded_execution_context" != "$current_execution_context" ]; then
+        printf 'Saved plan context does not match: field=execution_context expected=%s current=%s\n' "$recorded_execution_context" "$current_execution_context" >&2
+        return 4
+    fi
+    if [ "$recorded_frontend" != "$current_frontend" ]; then
+        printf 'Saved plan context does not match: field=frontend expected=%s current=%s\n' "$recorded_frontend" "$current_frontend" >&2
         return 4
     fi
 }
@@ -554,15 +588,20 @@ bootstrap_list_emit_text() {
         "$current_effective_user" \
         "$current_execution_context" \
         "$current_frontend"; then
-        while IFS= read -r action; do
-            [ -n "$action" ] && completed+=("$action")
-        done < <(bootstrap_state_completed_actions \
+        local completed_actions_output
+        if ! completed_actions_output="$(bootstrap_state_completed_actions \
             "$expected_hash" \
             "$current_target_user" \
             "$current_target_home" \
             "$current_effective_user" \
             "$current_execution_context" \
-            "$current_frontend")
+            "$current_frontend")"; then
+            return 4
+        fi
+
+        while IFS= read -r action; do
+            [ -n "$action" ] && completed+=("$action")
+        done <<<"$completed_actions_output"
     fi
 
     printf 'Bootstrap catalog\n'
@@ -612,15 +651,20 @@ bootstrap_list_emit_json() {
         "$current_effective_user" \
         "$current_execution_context" \
         "$current_frontend"; then
-        while IFS= read -r action; do
-            [ -n "$action" ] && completed+=("$action")
-        done < <(bootstrap_state_completed_actions \
+        local completed_actions_output
+        if ! completed_actions_output="$(bootstrap_state_completed_actions \
             "$expected_hash" \
             "$current_target_user" \
             "$current_target_home" \
             "$current_effective_user" \
             "$current_execution_context" \
-            "$current_frontend")
+            "$current_frontend")"; then
+            return 4
+        fi
+
+        while IFS= read -r action; do
+            [ -n "$action" ] && completed+=("$action")
+        done <<<"$completed_actions_output"
     fi
 
     printf '{\n'

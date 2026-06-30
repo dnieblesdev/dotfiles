@@ -40,11 +40,21 @@ err() { printf '  \033[31m✗\033[0m %s\n' "$1"; }
 run_privileged() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
-    elif command_exists sudo; then
-        sudo "$@"
-    else
+        return $?
+    fi
+
+    if ! command_exists sudo; then
+        printf 'sudo-unavailable\n' >&2
         return 127
     fi
+
+    if [ -z "${BOOTSTRAP_PRIVILEGED_DISPATCH_CONFIRMED:-}" ]; then
+        if ! bootstrap_confirm_privileged_dispatch; then
+            return $?
+        fi
+    fi
+
+    sudo /usr/bin/env PATH="$(bootstrap_trusted_child_path)" "$@"
 }
 
 detect_package_manager() {
@@ -77,17 +87,25 @@ bootstrap_brew_candidate_paths() {
 
     target_home="$(bootstrap_target_home)"
 
+    type -aP brew 2>/dev/null || true
     printf '%s\n' \
         "$target_home/.linuxbrew/bin/brew" \
+        "$target_home/.homebrew/bin/brew" \
         "/home/linuxbrew/.linuxbrew/bin/brew" \
         "/opt/homebrew/bin/brew" \
         "/usr/local/bin/brew"
+
+    printf '%s\n' \
+        "/Applications/Homebrew.app/Contents/Resources/homebrew/bin/brew" \
+        "/Applications/Homebrew.app/Contents/Resources/usr/local/bin/brew" \
+        "/Applications/Homebrew.app/Contents/Resources/bin/brew"
 }
 
 bootstrap_brew_binary_matches_target_owner() {
     local brew_bin="$1"
     local target_user
     local target_uid=""
+    local resolved_brew_bin=""
     local prefix_root=""
     local path_owner=""
     local prefix_owner=""
@@ -102,8 +120,13 @@ bootstrap_brew_binary_matches_target_owner() {
         return 1
     fi
 
-    prefix_root="$(dirname "$(dirname "$brew_bin")")"
-    path_owner="$(bootstrap_path_owner_uid "$brew_bin" 2>/dev/null || true)"
+    resolved_brew_bin="$(bootstrap_path_realpath "$brew_bin" 2>/dev/null || true)"
+    if [ -z "$resolved_brew_bin" ] || [ ! -x "$resolved_brew_bin" ]; then
+        return 1
+    fi
+
+    prefix_root="$(dirname "$(dirname "$resolved_brew_bin")")"
+    path_owner="$(bootstrap_path_owner_uid "$resolved_brew_bin" 2>/dev/null || true)"
     prefix_owner="$(bootstrap_path_owner_uid "$prefix_root" 2>/dev/null || true)"
 
     [ "$path_owner" = "$target_uid" ] && [ "$prefix_owner" = "$target_uid" ]
@@ -114,6 +137,7 @@ find_brew_binary() {
     local candidate_owner
     local prefix_owner
     local prefix_root
+    local resolved_candidate
     local target_user
     local target_uid=""
 
@@ -124,17 +148,21 @@ find_brew_binary() {
         [ -n "$candidate" ] || continue
         [ -x "$candidate" ] || continue
 
-        prefix_root="$(dirname "$(dirname "$candidate")")"
-        candidate_owner="$(bootstrap_path_owner_uid "$candidate" 2>/dev/null || true)"
+        resolved_candidate="$(bootstrap_path_realpath "$candidate" 2>/dev/null || true)"
+        [ -n "$resolved_candidate" ] || continue
+        [ -x "$resolved_candidate" ] || continue
+
+        prefix_root="$(dirname "$(dirname "$resolved_candidate")")"
+        candidate_owner="$(bootstrap_path_owner_uid "$resolved_candidate" 2>/dev/null || true)"
         prefix_owner="$(bootstrap_path_owner_uid "$prefix_root" 2>/dev/null || true)"
 
         if [ -n "$target_uid" ] && [ "$candidate_owner" = "$target_uid" ] && [ "$prefix_owner" = "$target_uid" ]; then
-            printf '%s\n' "$candidate"
+            printf '%s\n' "$resolved_candidate"
             return 0
         fi
 
         if [ -n "$target_uid" ] && [ -n "$candidate_owner" ] && [ -n "$prefix_owner" ]; then
-            warn "Ignoring brew at $candidate because ownership uid $candidate_owner and prefix uid $prefix_owner do not match target uid $target_uid"
+            warn "Ignoring brew at $candidate -> $resolved_candidate because ownership uid $candidate_owner and prefix uid $prefix_owner do not match target uid $target_uid"
         fi
     done <<EOF
 $(bootstrap_brew_candidate_paths)
@@ -412,13 +440,19 @@ bootstrap_spawn_shell_action() {
         fi
 
         target_home="${target_home:-$(bootstrap_home_for_user "$target_user")}"
-        sudo -u "$target_user" env \
+        local -a scrubbed_sudo_env=()
+
+        bootstrap_sudo_env_scrub_args scrubbed_sudo_env
+
+        sudo -u "$target_user" /usr/bin/env "${scrubbed_sudo_env[@]}" \
             HOME="$target_home" \
             USER="$target_user" \
             LOGNAME="$target_user" \
-            SUDO_USER="${SUDO_USER:-root}" \
+            PATH="$(bootstrap_trusted_child_path)" \
+            SHELL="${SHELL:-/bin/bash}" \
+            TERM="${TERM:-xterm-256color}" \
             BASH_ENV= \
-            bash -c 'source "$1"; source "$(dirname "$1")/lib/util.sh"; source "$(dirname "$1")/lib/catalog.sh"; source "$(dirname "$1")/lib/state.sh"; source "$(dirname "$1")/lib/planner.sh"; bootstrap_run_action "$2"' _ "$script_path" "$action"
+            /bin/bash -c 'source "$1"; source "$(dirname "$1")/lib/util.sh"; source "$(dirname "$1")/lib/catalog.sh"; source "$(dirname "$1")/lib/state.sh"; source "$(dirname "$1")/lib/planner.sh"; bootstrap_run_action "$2"' _ "$script_path" "$action"
         return $?
     fi
 
@@ -477,18 +511,80 @@ bootstrap_show_startup_context() {
 }
 
 bootstrap_confirm_root_warning() {
+    if [ -n "${BOOTSTRAP_ROOT_WARNING_CONFIRMED:-}" ]; then
+        return 0
+    fi
+
     if [ "$(bootstrap_effective_uid)" -ne 0 ]; then
         return 0
     fi
 
-    warn "Running as root is a security smell; explicit confirmation is required."
+    if bootstrap_test_mode_enabled && [ -n "${BOOTSTRAP_AUTO_CONFIRM:-}" ]; then
+        case "${BOOTSTRAP_AUTO_CONFIRM}" in
+            1|yes|YES|true|TRUE|y|Y)
+                BOOTSTRAP_ROOT_WARNING_CONFIRMED=1
+                return 0
+                ;;
+        esac
+    fi
 
-    if bootstrap_prompt_yes_no "Continue as root for this bootstrap run?"; then
+    warn "Running bootstrap/install.sh as root is risky."
+    warn "Re-run as a non-root user to keep brew-managed tools user-owned by default."
+    warn "Continuing as root will install system packages and may modify system files."
+
+    local confirm_rc=0
+    bootstrap_prompt_yes_no "Continue running bootstrap as root?" 30
+    confirm_rc=$?
+
+    case "$confirm_rc" in
+        0)
+            BOOTSTRAP_ROOT_WARNING_CONFIRMED=1
+            return 0
+            ;;
+        1)
+            printf 'root-warning-denied\n' >&2
+            return 4
+            ;;
+        *)
+            printf 'root-warning-timeout\n' >&2
+            return 5
+            ;;
+    esac
+}
+
+bootstrap_confirm_privileged_dispatch() {
+    local confirm_rc=0
+
+    if [ -n "${BOOTSTRAP_PRIVILEGED_DISPATCH_CONFIRMED:-}" ]; then
         return 0
     fi
 
-    err "Root confirmation declined"
-    return 1
+    if [ "$(bootstrap_effective_uid)" -eq 0 ]; then
+        BOOTSTRAP_PRIVILEGED_DISPATCH_CONFIRMED=1
+        return 0
+    fi
+
+    bootstrap_prompt_yes_no "Continue with sudo-mediated privileged execution?" 30
+    confirm_rc=$?
+    if [ "$confirm_rc" -eq 0 ]; then
+        BOOTSTRAP_PRIVILEGED_DISPATCH_CONFIRMED=1
+        return 0
+    fi
+
+    case "$confirm_rc" in
+        1)
+            printf 'confirmation-denied\n' >&2
+            return 4
+            ;;
+        2)
+            printf 'confirmation-timeout\n' >&2
+            return 5
+            ;;
+        *)
+            printf 'confirmation-timeout\n' >&2
+            return 5
+            ;;
+    esac
 }
 
 bootstrap_parse_args() {
@@ -660,11 +756,8 @@ bootstrap_command_plan() {
 bootstrap_command_apply() {
     bootstrap_parse_args "$@"
     BOOTSTRAP_FRONTEND_MODE="apply"
+    bootstrap_confirm_root_warning
     local current_hash=""
-
-    if ! bootstrap_confirm_root_warning; then
-        return 1
-    fi
 
     if [ -n "$BOOTSTRAP_PLAN_FILE" ]; then
         bootstrap_plan_from_json_file "$BOOTSTRAP_PLAN_FILE"
@@ -730,7 +823,7 @@ bootstrap_command_list() {
 }
 
 bootstrap_self_test() {
-    local temp_dir temp_state temp_state_seed temp_plan temp_stale_plan temp_tampered_plan temp_tampered_state temp_malicious_plan
+    local temp_dir temp_state temp_state_seed temp_plan temp_stale_plan temp_tampered_plan temp_tampered_state temp_malicious_plan temp_wrong_frontend_state temp_wrong_frontend_plan
     local -a execution_trace=()
     local -a warning_trace=()
     local baseline_hash mutated_hash
@@ -743,10 +836,21 @@ bootstrap_self_test() {
     temp_tampered_plan="$temp_dir/bootstrap-plan-tampered.json"
     temp_tampered_state="$temp_dir/bootstrap-state-tampered.json"
     temp_malicious_plan="$temp_dir/bootstrap-plan-malicious.json"
+    temp_wrong_frontend_state="$temp_dir/bootstrap-state-wrong-frontend.json"
+    temp_wrong_frontend_plan="$temp_dir/bootstrap-plan-wrong-frontend.json"
 
     local real_uid real_user
     real_uid="$(id -u)"
     real_user="$(id -un)"
+
+    local saved_bootstrap_target_user="${BOOTSTRAP_TARGET_USER:-}"
+    local saved_bootstrap_target_home="${BOOTSTRAP_TARGET_HOME:-}"
+    local saved_bootstrap_test_mode_active="${BOOTSTRAP_TEST_MODE_ACTIVE:-}"
+    local saved_bootstrap_test_mode="${BOOTSTRAP_TEST_MODE:-}"
+    BOOTSTRAP_TARGET_USER=""
+    BOOTSTRAP_TARGET_HOME=""
+    BOOTSTRAP_TEST_MODE_ACTIVE=""
+    BOOTSTRAP_TEST_MODE=""
 
     bootstrap_effective_uid() {
         printf '0\n'
@@ -788,29 +892,26 @@ bootstrap_self_test() {
 
     eval "$saved_bootstrap_sudo_provenance_trusted"
 
+    BOOTSTRAP_TEST_MODE=1
     BOOTSTRAP_TARGET_USER="alice"
     BOOTSTRAP_TARGET_HOME="/home/alice"
     if [ "$(bootstrap_target_user)" != "root" ]; then
-        err "Expected target user overrides to be ignored outside test mode"
+        err "Expected target user overrides to be ignored without explicit test mode"
         return 1
     fi
     if [ "$(bootstrap_target_home)" != "/root" ]; then
-        err "Expected target home overrides to be ignored outside test mode"
+        err "Expected target home overrides to be ignored without explicit test mode"
         return 1
     fi
-
-    warn() {
-        warning_trace+=("warn:$*")
-    }
 
     BOOTSTRAP_AUTO_CONFIRM=1
 
     if bootstrap_prompt_yes_no "Confirm override requires test mode"; then
-        err "Expected auto-confirm to be ignored outside explicit test mode"
+        err "Expected auto-confirm to be ignored without explicit test mode"
         return 1
     fi
 
-    BOOTSTRAP_TEST_MODE=1
+    BOOTSTRAP_TEST_MODE_ACTIVE=1
 
     if [ "$(bootstrap_target_user)" != "alice" ]; then
         err "Expected target user overrides to work in explicit test mode"
@@ -821,14 +922,312 @@ bootstrap_self_test() {
         return 1
     fi
 
-    if ! bootstrap_confirm_root_warning; then
-        err "Expected root confirmation to pass with auto-confirm"
+    local -a warning_trace=()
+
+    warn() {
+        warning_trace+=("warn:$*")
+    }
+
+    local saved_bootstrap_effective_uid
+    local saved_bootstrap_prompt_yes_no
+    local saved_command_exists
+    local saved_bootstrap_trusted_child_path_entries
+    local saved_bootstrap_path_owner_uid
+    local saved_sudo_function=""
+
+    saved_bootstrap_effective_uid="$(declare -f bootstrap_effective_uid)"
+    saved_bootstrap_prompt_yes_no="$(declare -f bootstrap_prompt_yes_no)"
+    saved_command_exists="$(declare -f command_exists)"
+    saved_bootstrap_trusted_child_path_entries="$(declare -f bootstrap_trusted_child_path_entries)"
+    saved_bootstrap_path_owner_uid="$(declare -f bootstrap_path_owner_uid)"
+    if declare -f sudo >/dev/null 2>&1; then
+        saved_sudo_function="$(declare -f sudo)"
+    fi
+
+    local -a confirm_trace=()
+    local -a sudo_trace=()
+    local expected_trusted_path
+    local saw_trusted_path=false
+    local saw_raw_path=false
+    local arg
+
+    bootstrap_effective_uid() {
+        printf '1000\n'
+    }
+
+    bootstrap_prompt_yes_no() {
+        confirm_trace+=("$1:$2")
+        return 0
+    }
+
+    command_exists() {
+        [ "$1" = sudo ] && return 0
+        return 1
+    }
+
+    sudo() {
+        sudo_trace=("$@")
+        "$@"
+    }
+
+    expected_trusted_path="$(bootstrap_trusted_child_path)"
+    if ! run_privileged true >/dev/null 2>&1; then
+        err "Expected privileged dispatch to succeed with auto-confirm"
+        return 1
+    fi
+    if ! run_privileged true >/dev/null 2>&1; then
+        err "Expected privileged dispatch to stay confirmed within the same phase"
         return 1
     fi
 
-    if [ "${#warning_trace[@]}" -lt 1 ]; then
-        err "Expected root warning messages to be emitted"
+    if [ "${#confirm_trace[@]}" -ne 1 ]; then
+        err "Expected privileged confirmation to happen once per sudo phase"
         return 1
+    fi
+
+    for arg in "${sudo_trace[@]}"; do
+        case "$arg" in
+            PATH="$expected_trusted_path") saw_trusted_path=true ;;
+            PATH=*) saw_raw_path=true ;;
+        esac
+    done
+
+    if [ "$saw_trusted_path" != true ] || [ "$saw_raw_path" = true ]; then
+        err "Expected privileged child launches to use the trusted PATH only"
+        return 1
+    fi
+
+    unset BOOTSTRAP_PRIVILEGED_DISPATCH_CONFIRMED
+    bootstrap_prompt_yes_no() {
+        return 1
+    }
+    if bootstrap_confirm_privileged_dispatch >/tmp/bootstrap-confirm-denied.out 2>&1; then
+        err "Expected confirmation denial to fail closed"
+        return 1
+    fi
+    if ! grep -q 'confirmation-denied' /tmp/bootstrap-confirm-denied.out; then
+        err "Expected confirmation denial to report confirmation-denied"
+        return 1
+    fi
+
+    bootstrap_prompt_yes_no() {
+        return 2
+    }
+    if bootstrap_confirm_privileged_dispatch >/tmp/bootstrap-confirm-timeout.out 2>&1; then
+        err "Expected confirmation timeout to fail closed"
+        return 1
+    fi
+    if ! grep -q 'confirmation-timeout' /tmp/bootstrap-confirm-timeout.out; then
+        err "Expected confirmation timeout to report confirmation-timeout"
+        return 1
+    fi
+
+    command_exists() {
+        return 1
+    }
+    if run_privileged true >/tmp/bootstrap-sudo-unavailable.out 2>&1; then
+        err "Expected missing sudo to fail closed"
+        return 1
+    fi
+    if ! grep -q 'sudo-unavailable' /tmp/bootstrap-sudo-unavailable.out; then
+        err "Expected missing sudo to report sudo-unavailable"
+        return 1
+    fi
+
+    command_exists() {
+        [ "$1" = sudo ] && return 0
+        return 1
+    }
+
+    local saved_bootstrap_trusted_child_path_entries_missing
+    local saved_bootstrap_trusted_child_path_entries_unowned
+    local saved_bootstrap_trusted_child_path_entries_writable
+    local saved_bootstrap_path_owner_uid_writable
+    local missing_trusted_dir unowned_trusted_dir writable_trusted_dir
+
+    missing_trusted_dir="$temp_dir/missing-trusted/bin"
+    unowned_trusted_dir="$temp_dir/unowned-trusted/bin"
+    writable_trusted_dir="$temp_dir/writable-trusted/bin"
+    mkdir -p "$(dirname "$unowned_trusted_dir")" "$(dirname "$writable_trusted_dir")"
+    mkdir -p "$unowned_trusted_dir" "$writable_trusted_dir"
+    chmod 755 "$unowned_trusted_dir"
+    chmod 777 "$writable_trusted_dir"
+
+    bootstrap_trusted_child_path_entries() {
+        printf '%s\n' "$missing_trusted_dir"
+    }
+    if bootstrap_trusted_child_path >/tmp/bootstrap-trusted-path-missing.out 2>&1; then
+        err "Expected missing trusted PATH entries to fail closed"
+        return 1
+    fi
+    if ! grep -q 'trusted-path-invalid' /tmp/bootstrap-trusted-path-missing.out; then
+        err "Expected missing trusted PATH entries to report trusted-path-invalid"
+        return 1
+    fi
+
+    bootstrap_trusted_child_path_entries() {
+        printf '%s\n' "$unowned_trusted_dir"
+    }
+    if bootstrap_trusted_child_path >/tmp/bootstrap-trusted-path-unowned.out 2>&1; then
+        err "Expected non-root-owned trusted PATH entries to fail closed"
+        return 1
+    fi
+    if ! grep -q 'trusted-path-invalid' /tmp/bootstrap-trusted-path-unowned.out; then
+        err "Expected non-root-owned trusted PATH entries to report trusted-path-invalid"
+        return 1
+    fi
+
+    saved_bootstrap_path_owner_uid_writable="$(declare -f bootstrap_path_owner_uid)"
+    bootstrap_path_owner_uid() {
+        case "$1" in
+            "$writable_trusted_dir")
+                printf '0\n'
+                ;;
+            *)
+                printf '0\n'
+                ;;
+        esac
+    }
+    bootstrap_trusted_child_path_entries() {
+        printf '%s\n' "$writable_trusted_dir"
+    }
+    if bootstrap_trusted_child_path >/tmp/bootstrap-trusted-path-writable.out 2>&1; then
+        err "Expected writable trusted PATH entries to fail closed"
+        return 1
+    fi
+    if ! grep -q 'trusted-path-invalid' /tmp/bootstrap-trusted-path-writable.out; then
+        err "Expected writable trusted PATH entries to report trusted-path-invalid"
+        return 1
+    fi
+
+    local temp_shadow_dir temp_shadow_bash child_bash_path
+    temp_shadow_dir="$temp_dir/shadow-path"
+    mkdir -p "$temp_shadow_dir"
+    temp_shadow_bash="$temp_shadow_dir/bash"
+    cat >"$temp_shadow_bash" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "shadow-bash"
+EOF
+    chmod +x "$temp_shadow_bash"
+
+    bootstrap_path_owner_uid() {
+        printf '0\n'
+    }
+    bootstrap_trusted_child_path_entries() {
+        printf '%s\n' /usr/bin /bin /usr/sbin /sbin
+    }
+    sudo() {
+        "$@"
+    }
+    bootstrap_effective_uid() {
+        printf '1000\n'
+    }
+    bootstrap_prompt_yes_no() {
+        return 0
+    }
+
+    child_bash_path="$(PATH="$temp_shadow_dir:${PATH:-/usr/bin:/bin}" run_privileged bash -c 'command -v bash')"
+    if [ "$child_bash_path" = "$temp_shadow_bash" ]; then
+        err "Expected privileged child resolution to ignore caller PATH shadowing"
+        return 1
+    fi
+
+    eval "$saved_bootstrap_effective_uid"
+    eval "$saved_bootstrap_prompt_yes_no"
+    eval "$saved_command_exists"
+    eval "$saved_bootstrap_trusted_child_path_entries"
+    eval "$saved_bootstrap_path_owner_uid"
+    if [ -n "$saved_sudo_function" ]; then
+        eval "$saved_sudo_function"
+    else
+        unset -f sudo 2>/dev/null || true
+    fi
+
+    local saved_root_warning_effective_uid saved_root_warning_prompt
+    saved_root_warning_effective_uid="$(declare -f bootstrap_effective_uid)"
+    saved_root_warning_prompt="$(declare -f bootstrap_prompt_yes_no)"
+
+    local saved_root_warning_auto_confirm="${BOOTSTRAP_AUTO_CONFIRM:-}"
+    local saved_root_warning_confirmed="${BOOTSTRAP_ROOT_WARNING_CONFIRMED:-}"
+    BOOTSTRAP_AUTO_CONFIRM=""
+    BOOTSTRAP_ROOT_WARNING_CONFIRMED=""
+
+    bootstrap_effective_uid() { printf '1000\n'; }
+    bootstrap_prompt_yes_no() {
+        err "Expected non-root to skip the warning prompt"
+        return 99
+    }
+    if ! bootstrap_confirm_root_warning; then
+        err "Expected non-root confirm_root_warning to succeed"
+        return 1
+    fi
+
+    bootstrap_effective_uid() { printf '0\n'; }
+    bootstrap_prompt_yes_no() {
+        err "Expected auto-confirm to skip the warning prompt"
+        return 99
+    }
+    BOOTSTRAP_AUTO_CONFIRM="1"
+    if ! bootstrap_confirm_root_warning; then
+        err "Expected auto-confirm to confirm root warning"
+        return 1
+    fi
+    if [ "${BOOTSTRAP_ROOT_WARNING_CONFIRMED:-}" != "1" ]; then
+        err "Expected auto-confirm to set the root warning flag"
+        return 1
+    fi
+
+    BOOTSTRAP_AUTO_CONFIRM=""
+    BOOTSTRAP_ROOT_WARNING_CONFIRMED=""
+    bootstrap_prompt_yes_no() { return 0; }
+    if ! bootstrap_confirm_root_warning; then
+        err "Expected user confirm to succeed"
+        return 1
+    fi
+    if [ "${BOOTSTRAP_ROOT_WARNING_CONFIRMED:-}" != "1" ]; then
+        err "Expected user confirm to set the root warning flag"
+        return 1
+    fi
+
+    BOOTSTRAP_ROOT_WARNING_CONFIRMED=""
+    bootstrap_prompt_yes_no() { return 1; }
+    if bootstrap_confirm_root_warning >/tmp/bootstrap-root-warning-denied.out 2>&1; then
+        err "Expected user deny to fail closed"
+        return 1
+    fi
+    if ! grep -q 'root-warning-denied' /tmp/bootstrap-root-warning-denied.out; then
+        err "Expected user deny to report root-warning-denied"
+        return 1
+    fi
+
+    BOOTSTRAP_ROOT_WARNING_CONFIRMED=""
+    bootstrap_prompt_yes_no() { return 2; }
+    if bootstrap_confirm_root_warning >/tmp/bootstrap-root-warning-timeout.out 2>&1; then
+        err "Expected root warning timeout to fail closed"
+        return 1
+    fi
+    if ! grep -q 'root-warning-timeout' /tmp/bootstrap-root-warning-timeout.out; then
+        err "Expected root warning timeout to report root-warning-timeout"
+        return 1
+    fi
+
+    BOOTSTRAP_ROOT_WARNING_CONFIRMED="1"
+    bootstrap_prompt_yes_no() {
+        err "Expected idempotent call to skip the warning prompt"
+        return 99
+    }
+    if ! bootstrap_confirm_root_warning; then
+        err "Expected idempotent confirm to succeed"
+        return 1
+    fi
+
+    eval "$saved_root_warning_effective_uid"
+    eval "$saved_root_warning_prompt"
+    BOOTSTRAP_AUTO_CONFIRM="$saved_root_warning_auto_confirm"
+    if [ -n "$saved_root_warning_confirmed" ]; then
+        BOOTSTRAP_ROOT_WARNING_CONFIRMED="$saved_root_warning_confirmed"
+    else
+        unset BOOTSTRAP_ROOT_WARNING_CONFIRMED
     fi
 
     bootstrap_run_action() {
@@ -848,7 +1247,9 @@ bootstrap_self_test() {
         return 1
     fi
 
-    unset -f bootstrap_run_action
+    bootstrap_run_action() {
+        return 23
+    }
 
     bootstrap_effective_uid() {
         printf '0\n'
@@ -857,6 +1258,9 @@ bootstrap_self_test() {
     bootstrap_effective_user() {
         printf 'root\n'
     }
+
+    local saved_bootstrap_spawn_shell_action
+    saved_bootstrap_spawn_shell_action="$(declare -f bootstrap_spawn_shell_action)"
 
     bootstrap_spawn_shell_action() {
         execution_trace+=("$1:$2:${BOOTSTRAP_TARGET_USER:-}:${BOOTSTRAP_TARGET_HOME:-}")
@@ -874,6 +1278,7 @@ bootstrap_self_test() {
     fi
     BOOTSTRAP_TARGET_USER="$saved_target_user"
     BOOTSTRAP_TARGET_HOME="$saved_target_home"
+    eval "$saved_bootstrap_spawn_shell_action"
 
     local saved_privilege="${BOOTSTRAP_ACTION_PRIVILEGES[brew-tools]:-}"
     unset 'BOOTSTRAP_ACTION_PRIVILEGES[brew-tools]'
@@ -894,11 +1299,13 @@ bootstrap_self_test() {
     BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
     execution_trace=()
     warning_trace=()
-    if BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_execute_plan >/dev/null 2>&1; then
+    set +e
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_execute_plan >/dev/null 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
         err "Expected failed actions to stop the bootstrap"
         return 1
-    else
-        rc=$?
     fi
 
     if [ "$rc" -ne 23 ]; then
@@ -995,6 +1402,98 @@ assert privileges['homebrew-bootstrap'] == 'user', privileges
 assert privileges['brew-tools'] == 'user', privileges
 assert plan['context']['frontend'] == 'apply', plan['context']
 PY
+
+    local saved_sudo_function=""
+    if declare -f sudo >/dev/null 2>&1; then
+        saved_sudo_function="$(declare -f sudo)"
+    fi
+
+    local -a sudo_trace=()
+    sudo() {
+        sudo_trace=("$@")
+        return 0
+    }
+
+    SUDO_USER="$real_user" \
+    SUDO_UID="$real_uid" \
+    SUDO_GID="$real_uid" \
+    SUDO_COMMAND="sudo -u $real_user bash" \
+    BOOTSTRAP_TARGET_USER="$real_user" \
+    BOOTSTRAP_TARGET_HOME="/home/$real_user" \
+    bootstrap_spawn_shell_action user "brew-tools" >/dev/null 2>&1 || true
+
+    local saw_sudo_user_scrub=false
+    local saw_sudo_uid_scrub=false
+    local saw_sudo_gid_scrub=false
+    local saw_sudo_command_scrub=false
+    local saw_stale_sudo_assignment=false
+    local arg
+    for arg in "${sudo_trace[@]}"; do
+        case "$arg" in
+            SUDO_USER) saw_sudo_user_scrub=true ;;
+            SUDO_UID) saw_sudo_uid_scrub=true ;;
+            SUDO_GID) saw_sudo_gid_scrub=true ;;
+            SUDO_COMMAND) saw_sudo_command_scrub=true ;;
+            SUDO_*=*) saw_stale_sudo_assignment=true ;;
+        esac
+    done
+
+    if [ "$saw_sudo_user_scrub" != true ] || [ "$saw_sudo_uid_scrub" != true ] || [ "$saw_sudo_gid_scrub" != true ] || [ "$saw_sudo_command_scrub" != true ] || [ "$saw_stale_sudo_assignment" = true ]; then
+        err "Expected demoted child launch to scrub sudo provenance env"
+        return 1
+    fi
+
+    local expected_trusted_path
+    expected_trusted_path="$(bootstrap_trusted_child_path)"
+    local saw_trusted_path=false
+    local saw_raw_path=false
+    for arg in "${sudo_trace[@]}"; do
+        case "$arg" in
+            PATH="$expected_trusted_path") saw_trusted_path=true ;;
+            PATH=*) saw_raw_path=true ;;
+        esac
+    done
+
+    if [ "$saw_trusted_path" != true ] || [ "$saw_raw_path" = true ]; then
+        err "Expected demoted child launch to use a sanitized trusted PATH"
+        return 1
+    fi
+
+    unset -f sudo 2>/dev/null || true
+    if [ -n "$saved_sudo_function" ]; then
+        eval "$saved_sudo_function"
+    fi
+
+    local temp_path_brew_dir temp_path_brew_bin temp_app_brew_dir temp_app_brew_bin
+    temp_path_brew_dir="$temp_dir/nonstandard-prefix/bin"
+    temp_path_brew_bin="$temp_path_brew_dir/brew"
+    temp_app_brew_dir="$temp_dir/Applications/Homebrew.app/Contents/Resources/homebrew/bin"
+    temp_app_brew_bin="$temp_app_brew_dir/brew"
+    mkdir -p "$temp_path_brew_dir" "$temp_app_brew_dir"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$temp_path_brew_bin"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$temp_app_brew_bin"
+    chmod +x "$temp_path_brew_bin" "$temp_app_brew_bin"
+
+    local path_found=""
+    path_found="$(PATH="$temp_path_brew_dir:${PATH:-/usr/bin:/bin}" BOOTSTRAP_TARGET_USER="$real_user" BOOTSTRAP_TARGET_HOME="$temp_dir/nonstandard-home" find_brew_binary)"
+    if [ "$path_found" != "$temp_path_brew_bin" ]; then
+        err "Expected brew discovery to respect a valid PATH install"
+        return 1
+    fi
+
+    local saved_bootstrap_brew_candidate_paths
+    saved_bootstrap_brew_candidate_paths="$(declare -f bootstrap_brew_candidate_paths)"
+    bootstrap_brew_candidate_paths() {
+        printf '%s\n' "$temp_app_brew_bin"
+    }
+
+    path_found="$(PATH="/usr/bin:/bin" BOOTSTRAP_TARGET_USER="$real_user" BOOTSTRAP_TARGET_HOME="$temp_dir/app-home" find_brew_binary)"
+    if [ "$path_found" != "$temp_app_brew_bin" ]; then
+        err "Expected brew discovery to accept a Homebrew.app-style install"
+        return 1
+    fi
+
+    eval "$saved_bootstrap_brew_candidate_paths"
 
     local saved_bootstrap_brew_candidate_paths saved_bootstrap_path_owner_uid
     local temp_brew_user_dir temp_brew_system_dir user_brew_bin system_brew_bin
@@ -1095,11 +1594,17 @@ EOF
     BOOTSTRAP_FRONTEND_MODE=apply BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "brew-tools" "" ""
     execution_trace=()
     warning_trace=()
+    bootstrap_spawn_shell_action() {
+        execution_trace+=("$1:$2:${BOOTSTRAP_TARGET_USER:-}:${BOOTSTRAP_TARGET_HOME:-}")
+        return 0
+    }
     BOOTSTRAP_STATE_FILE="$temp_state" BOOTSTRAP_TARGET_USER="alice" BOOTSTRAP_TARGET_HOME="/home/alice" bootstrap_execute_plan
     if [ "$(bootstrap_join_csv "${execution_trace[@]}")" != "root:system-packages:alice:/home/alice,user:homebrew-bootstrap:alice:/home/alice,user:brew-tools:alice:/home/alice" ]; then
         err "Expected per-action privilege routing to keep user-owned actions out of root"
         return 1
     fi
+
+    eval "$saved_bootstrap_spawn_shell_action"
 
     cp "$temp_state_seed" "$temp_state"
     BOOTSTRAP_STATE_FILE="$temp_state"
@@ -1113,6 +1618,66 @@ EOF
     }
     if [ -z "${BOOTSTRAP_PLAN_SIGNATURE:-}" ]; then
         err "Expected signed plan to carry a signature"
+        return 1
+    fi
+
+    cp "$temp_plan" "$temp_plan.version"
+    python3 - "$temp_plan.version" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+
+data['schema_version'] = 2
+with open(path, 'w', encoding='utf-8') as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+PY
+
+    if bootstrap_plan_from_json_file "$temp_plan.version" >/dev/null 2>&1; then
+        err "Expected incompatible saved plan version to be rejected"
+        return 1
+    fi
+
+    local temp_bad_state temp_bad_context
+    temp_bad_state="$temp_dir/bootstrap-state-bad.json"
+    temp_bad_context="$temp_dir/bootstrap-state-bad-context.json"
+
+    printf '{"not": "json"' >"$temp_bad_state"
+    if BOOTSTRAP_STATE_FILE="$temp_bad_state" bootstrap_state_completed_actions \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "root-shell" \
+        "apply" >/dev/null 2>&1; then
+        err "Expected malformed state to fail closed"
+        return 1
+    fi
+
+    cp "$temp_state_seed" "$temp_bad_context"
+    python3 - "$temp_bad_context" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+
+data['context']['execution_context'] = 'sudo-session'
+with open(path, 'w', encoding='utf-8') as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+PY
+
+    if BOOTSTRAP_STATE_FILE="$temp_bad_context" bootstrap_state_completed_actions \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "root-shell" \
+        "apply" >/dev/null 2>&1; then
+        err "Expected context-mismatched state to fail closed"
         return 1
     fi
 
@@ -1159,15 +1724,21 @@ PY
     fi
 
     completed_trace=()
-    while IFS= read -r action; do
-        [ -n "$action" ] && completed_trace+=("$action")
-    done < <(BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_state_completed_actions \
+    local completed_trace_output
+    if ! completed_trace_output="$(BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_state_completed_actions \
         "$(bootstrap_catalog_hash)" \
         "alice" \
         "/home/alice" \
         "root" \
         "root-shell" \
-        "apply")
+        "apply")"; then
+        err "Expected signed state replay to succeed"
+        return 1
+    fi
+
+    while IFS= read -r action; do
+        [ -n "$action" ] && completed_trace+=("$action")
+    done <<<"$completed_trace_output"
 
     if [ "$(bootstrap_join_csv "${completed_trace[@]}")" != "system-packages,homebrew-bootstrap" ]; then
         err "Expected signed state round-trip to preserve the completed-actions list"
@@ -1232,13 +1803,14 @@ PY
         return 1
     fi
 
-    if [ -n "$(BOOTSTRAP_STATE_FILE="$temp_tampered_state" bootstrap_state_completed_actions \
+    if BOOTSTRAP_STATE_FILE="$temp_tampered_state" bootstrap_state_completed_actions \
         "$(bootstrap_catalog_hash)" \
         "alice" \
         "/home/alice" \
         "root" \
-        "sudo-session" 2>/dev/null)" ]; then
-        err "Expected tampered state completed-actions replay to be empty"
+        "sudo-session" \
+        "apply" >/dev/null 2>&1; then
+        err "Expected tampered state completed-actions replay to fail closed"
         return 1
     fi
 
@@ -1257,17 +1829,96 @@ PY
         return 1
     fi
 
+    cp "$temp_state_seed" "$temp_wrong_frontend_state"
+    python3 - "$temp_wrong_frontend_state" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+
+data['context']['frontend'] = 'plan'
+with open(path, 'w', encoding='utf-8') as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+PY
+    bootstrap_json_sign_canonical "$(bootstrap_integrity_load_secret)" <"$temp_wrong_frontend_state" >"$temp_wrong_frontend_state.resigned"
+    mv "$temp_wrong_frontend_state.resigned" "$temp_wrong_frontend_state"
+
+    if BOOTSTRAP_STATE_FILE="$temp_wrong_frontend_state" bootstrap_state_is_current \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "root-shell" \
+        "apply" 2>/tmp/bootstrap-state-frontend-mismatch.out; then
+        err "Expected state with mismatched frontend to be rejected"
+        return 1
+    fi
+    if ! grep -q 'provenance:frontend:apply:plan' /tmp/bootstrap-state-frontend-mismatch.out; then
+        err "Expected explicit frontend mismatch reason on state load"
+        return 1
+    fi
+
+    if BOOTSTRAP_STATE_FILE="$temp_wrong_frontend_state" bootstrap_state_completed_actions \
+        "$(bootstrap_catalog_hash)" \
+        "alice" \
+        "/home/alice" \
+        "root" \
+        "root-shell" \
+        "apply" 2>/tmp/bootstrap-state-completed-frontend-mismatch.out >/dev/null; then
+        err "Expected state completed-actions replay with mismatched frontend to be rejected"
+        return 1
+    fi
+    if ! grep -q 'frontend' /tmp/bootstrap-state-completed-frontend-mismatch.out; then
+        err "Expected explicit frontend mismatch reason on state completed-actions replay"
+        return 1
+    fi
+
+    cp "$temp_plan" "$temp_wrong_frontend_plan"
+    python3 - "$temp_wrong_frontend_plan" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as fh:
+    data = json.load(fh)
+
+data['context']['frontend'] = 'plan'
+with open(path, 'w', encoding='utf-8') as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+PY
+    bootstrap_json_sign_canonical "$(bootstrap_integrity_load_secret)" <"$temp_wrong_frontend_plan" >"$temp_wrong_frontend_plan.resigned"
+    mv "$temp_wrong_frontend_plan.resigned" "$temp_wrong_frontend_plan"
+
+    bootstrap_plan_from_json_file "$temp_wrong_frontend_plan" >/dev/null 2>&1 || {
+        err "Expected signed plan with mismatched frontend to load cleanly"
+        return 1
+    }
+    if bootstrap_plan_enforce_context 2>/tmp/bootstrap-plan-frontend-mismatch.out; then
+        err "Expected plan enforce-context to reject mismatched frontend"
+        return 1
+    fi
+    if ! grep -q 'frontend' /tmp/bootstrap-plan-frontend-mismatch.out; then
+        err "Expected explicit frontend mismatch reason on plan enforce-context"
+        return 1
+    fi
+
+    BOOTSTRAP_TARGET_USER="$saved_bootstrap_target_user"
+    BOOTSTRAP_TARGET_HOME="$saved_bootstrap_target_home"
+    BOOTSTRAP_TEST_MODE_ACTIVE="$saved_bootstrap_test_mode_active"
+    BOOTSTRAP_TEST_MODE="$saved_bootstrap_test_mode"
+
     rm -rf "$temp_dir"
     ok "Bootstrap planner self-test passed"
 }
 
 main() {
-    echo ""
-    printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
-    printf '\033[1m  Dotfiles Bootstrap\033[0m\n'
-    printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n\n'
-
     bootstrap_parse_args "$@"
+    if [ "${BOOTSTRAP_COMMAND:-apply}" = test ]; then
+        BOOTSTRAP_TEST_MODE_ACTIVE=1
+        BOOTSTRAP_TEST_MODE=1
+    fi
     bootstrap_show_startup_context "${BOOTSTRAP_COMMAND:-apply}"
     echo
 

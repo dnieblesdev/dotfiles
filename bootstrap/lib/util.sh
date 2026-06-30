@@ -7,6 +7,14 @@ command_exists() {
 }
 
 bootstrap_test_mode_enabled() {
+    case "${BOOTSTRAP_TEST_MODE_ACTIVE:-0}" in
+        1|true|TRUE|yes|YES|y|Y)
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
     case "${BOOTSTRAP_TEST_MODE:-}" in
         1|true|TRUE|yes|YES|y|Y)
             return 0
@@ -47,6 +55,39 @@ except FileNotFoundError:
 except Exception:
     raise SystemExit(1)
 PY
+}
+
+bootstrap_path_realpath() {
+    local path="$1"
+
+    python3 - "$path" <<'PY'
+import os, sys
+
+try:
+    print(os.path.realpath(sys.argv[1]))
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+bootstrap_sudo_env_scrub_args() {
+    local array_name="$1"
+    local -a scrub_args=()
+    local env_name
+
+    while IFS= read -r env_name; do
+        case "$env_name" in
+            SUDO_*) scrub_args+=("-u" "$env_name") ;;
+        esac
+    done < <(compgen -e)
+
+    if [ -n "${BASH_VERSION:-}" ]; then
+        local -n target_ref="$array_name"
+        target_ref=("${scrub_args[@]}")
+        return 0
+    fi
+
+    return 1
 }
 
 bootstrap_process_uid() {
@@ -292,6 +333,7 @@ bootstrap_execution_context() {
 
 bootstrap_prompt_yes_no() {
     local prompt="$1"
+    local timeout_seconds="${2:-30}"
     local answer=""
 
     if bootstrap_test_mode_enabled && [ -n "${BOOTSTRAP_AUTO_CONFIRM:-}" ]; then
@@ -301,11 +343,15 @@ bootstrap_prompt_yes_no() {
     fi
 
     if [ ! -t 0 ] && [ ! -t 1 ]; then
-        return 1
+        return 2
     fi
 
     printf '%s [y/N]: ' "$prompt" >&2
-    read -r answer < /dev/tty || read -r answer || return 1
+    if [ -r /dev/tty ]; then
+        read -r -t "$timeout_seconds" answer </dev/tty || return 2
+    else
+        read -r -t "$timeout_seconds" answer || return 2
+    fi
     case "$answer" in
         y|Y|yes|YES) return 0 ;;
     esac
@@ -313,11 +359,70 @@ bootstrap_prompt_yes_no() {
     return 1
 }
 
+bootstrap_trusted_child_path_entries() {
+    printf '%s\n' \
+        '/usr/bin' \
+        '/bin' \
+        '/usr/sbin' \
+        '/sbin'
+}
+
+bootstrap_trusted_path_entry_is_safe() {
+    local path="$1"
+
+    python3 - "$path" <<'PY'
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+
+try:
+    st = os.stat(path)
+except Exception:
+    raise SystemExit(1)
+
+if not stat.S_ISDIR(st.st_mode):
+    raise SystemExit(1)
+if st.st_uid != 0:
+    raise SystemExit(1)
+if st.st_mode & 0o022:
+    raise SystemExit(1)
+PY
+}
+
 bootstrap_json_bool() {
     case "${1:-false}" in
         1|true|TRUE|yes|YES|y|Y) printf 'true\n' ;;
         *) printf 'false\n' ;;
     esac
+}
+
+bootstrap_trusted_child_path() {
+    local path_entry
+    local trusted_path=""
+
+    while IFS= read -r path_entry; do
+        [ -n "$path_entry" ] || continue
+
+        if ! bootstrap_trusted_path_entry_is_safe "$path_entry"; then
+            printf 'trusted-path-invalid\n' >&2
+            return 1
+        fi
+
+        if [ -z "$trusted_path" ]; then
+            trusted_path="$path_entry"
+        else
+            trusted_path="$trusted_path:$path_entry"
+        fi
+    done < <(bootstrap_trusted_child_path_entries)
+
+    if [ -z "$trusted_path" ]; then
+        printf 'trusted-path-invalid\n' >&2
+        return 1
+    fi
+
+    printf '%s\n' "$trusted_path"
 }
 
 bootstrap_split_csv_into_array() {

@@ -35,12 +35,13 @@ bootstrap_state_is_current() {
     local expected_target_home="$3"
     local expected_effective_user="$4"
     local expected_execution_context="$5"
+    local expected_frontend="$6"
     local state_file
     local signature_file
     state_file="$(bootstrap_state_file)"
     signature_file="$(bootstrap_state_signature_file)"
 
-    python3 - "$state_file" "$signature_file" "$expected_hash" "$expected_target_user" "$expected_target_home" "$expected_effective_user" "$expected_execution_context" <<'PY'
+    python3 - "$state_file" "$signature_file" "$expected_hash" "$expected_target_user" "$expected_target_home" "$expected_effective_user" "$expected_execution_context" "$expected_frontend" <<'PY'
 import json, os, sys
 import hmac
 import hashlib
@@ -53,28 +54,33 @@ expected_context = {
     'target_home': sys.argv[5],
     'effective_user': sys.argv[6],
     'execution_context': sys.argv[7],
+    'frontend': sys.argv[8],
 }
+
+def fail(reason):
+    print(f'provenance:{reason}', file=sys.stderr)
+    raise SystemExit(1)
 
 try:
     with open(state_file, 'r', encoding='utf-8') as fh:
         data = json.load(fh)
 except FileNotFoundError:
-    raise SystemExit(1)
+    fail('state_file:missing')
 except Exception:
-    raise SystemExit(1)
+    fail('state_file:unreadable')
 
 try:
     with open(signature_file, 'r', encoding='utf-8') as fh:
         secret = fh.read().strip()
 except Exception:
-    raise SystemExit(1)
+    fail('signature_file:unreadable')
 
 if not secret:
-    raise SystemExit(1)
+    fail('signature:empty')
 
 signature = data.get('signature', '')
 if not signature:
-    raise SystemExit(1)
+    fail('signature:missing')
 
 payload = dict(data)
 payload.pop('signature', None)
@@ -82,18 +88,22 @@ canonical = json.dumps(payload, indent=2, separators=(', ', ': '), ensure_ascii=
 expected_signature = hmac.new(secret.encode('utf-8'), canonical.encode('utf-8'), hashlib.sha256).hexdigest()
 
 if signature != expected_signature:
-    raise SystemExit(1)
+    fail('signature:mismatch')
 
 if data.get('schema_version') != 1:
-    raise SystemExit(1)
+    fail('schema_version:incompatible')
 
 if data.get('catalog_hash') != expected_hash:
-    raise SystemExit(1)
+    fail('catalog_hash:mismatch')
 
 context = data.get('context', {})
+if not isinstance(context, dict):
+    fail('context:invalid')
+
 for key, expected in expected_context.items():
-    if context.get(key, '') != expected:
-        raise SystemExit(1)
+    actual = context.get(key, '')
+    if actual != expected:
+        fail(f'{key}:{expected}:{actual}')
 
 raise SystemExit(0)
 PY
@@ -105,12 +115,13 @@ bootstrap_state_completed_actions() {
     local expected_target_home="$3"
     local expected_effective_user="$4"
     local expected_execution_context="$5"
+    local expected_frontend="$6"
     local state_file
     local signature_file
     state_file="$(bootstrap_state_file)"
     signature_file="$(bootstrap_state_signature_file)"
 
-    python3 - "$state_file" "$signature_file" "$expected_hash" "$expected_target_user" "$expected_target_home" "$expected_effective_user" "$expected_execution_context" <<'PY'
+    python3 - "$state_file" "$signature_file" "$expected_hash" "$expected_target_user" "$expected_target_home" "$expected_effective_user" "$expected_execution_context" "$expected_frontend" <<'PY'
 import json, sys
 import hmac
 import hashlib
@@ -123,26 +134,36 @@ expected_context = {
     'target_home': sys.argv[5],
     'effective_user': sys.argv[6],
     'execution_context': sys.argv[7],
+    'frontend': sys.argv[8],
 }
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
 
 try:
     with open(state_file, 'r', encoding='utf-8') as fh:
         data = json.load(fh)
-except Exception:
-    raise SystemExit(0)
+except FileNotFoundError:
+    fail('Saved bootstrap state file is missing')
+except Exception as exc:
+    fail(f'Saved bootstrap state file could not be parsed: {exc}')
+
+if not isinstance(data, dict):
+    fail('Saved bootstrap state is invalid')
 
 try:
     with open(signature_file, 'r', encoding='utf-8') as fh:
         secret = fh.read().strip()
-except Exception:
-    raise SystemExit(0)
+except Exception as exc:
+    fail(f'Saved bootstrap secret could not be loaded: {exc}')
 
 if not secret:
-    raise SystemExit(0)
+    fail('Saved bootstrap secret is empty')
 
 signature = data.get('signature', '')
 if not signature:
-    raise SystemExit(0)
+    fail('Saved bootstrap state is missing a signature')
 
 payload = dict(data)
 payload.pop('signature', None)
@@ -150,18 +171,22 @@ canonical = json.dumps(payload, indent=2, separators=(', ', ': '), ensure_ascii=
 expected_signature = hmac.new(secret.encode('utf-8'), canonical.encode('utf-8'), hashlib.sha256).hexdigest()
 
 if signature != expected_signature:
-    raise SystemExit(0)
+    fail('Saved bootstrap state signature does not match')
 
 if data.get('schema_version') != 1:
-    raise SystemExit(0)
+    fail('Saved bootstrap state schema version is incompatible')
 
 if data.get('catalog_hash') != expected_hash:
-    raise SystemExit(0)
+    fail('Saved bootstrap state catalog hash does not match')
 
 context = data.get('context', {})
+if not isinstance(context, dict):
+    fail('Saved bootstrap state context is invalid')
+
 for key, expected in expected_context.items():
-    if context.get(key, '') != expected:
-        raise SystemExit(0)
+    actual = context.get(key, '')
+    if actual != expected:
+        fail(f'Saved bootstrap state context does not match: field={key} expected={expected!r} actual={actual!r}')
 
 for action in data.get('completed_actions', []):
     print(action)
