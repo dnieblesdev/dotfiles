@@ -598,7 +598,7 @@ bootstrap_parse_args() {
     local -a positional=()
 
     case "${1:-}" in
-        plan|apply|list|controller|test|help|-h|--help)
+        plan|apply|list|controller|test|tui|help|-h|--help)
             BOOTSTRAP_COMMAND="$1"
             shift || true
             ;;
@@ -654,7 +654,12 @@ bootstrap_parse_args() {
                 done
                 ;;
             -h|--help)
-                BOOTSTRAP_COMMAND="help"
+                # `--help` only flips into the help command when no explicit
+                # subcommand was given. Once the user picks a command (e.g.
+                # `tui --help`), the flag is forwarded to that command.
+                if [ "$BOOTSTRAP_COMMAND" = "apply" ]; then
+                    BOOTSTRAP_COMMAND="help"
+                fi
                 shift
                 ;;
             *)
@@ -825,6 +830,224 @@ bootstrap_command_list() {
 
 bootstrap_command_controller() {
     bootstrap_controller_handle_request
+}
+
+# ── TUI launcher ──
+# The `tui` command is a launcher for the optional Go controller. It is a
+# separate code path that does NOT change the default shell behavior of
+# `install.sh` — invoking `bash installer/install.sh` (no args or `apply`)
+# still runs the shell bootstrap as before.
+#
+# When the user runs `bash installer/install.sh tui`, the launcher:
+#   1. Ensures `~/.local/bin` is on PATH for the current invocation.
+#   2. Detects Go (`command -v go`). If missing, it installs Go user-locally
+#      at `~/.local/go` from the official go.dev tarball and symlinks the
+#      `go`/`gofmt` binaries into `~/.local/bin` so the toolchain is on PATH.
+#   3. Builds `bootstrap-controller` from `cmd/bootstrap-controller/` into
+#      `~/.local/bin/bootstrap-controller` if the binary is missing or older
+#      than its sources.
+#   4. `exec`s the controller binary, forwarding every arg after `tui`.
+#
+# The launcher never touches the system package manager, never uses sudo, and
+# skips the install when Go is already available.
+
+BOOTSTRAP_TUI_GO_DEST="$HOME/.local/go"
+BOOTSTRAP_TUI_LOCAL_BIN="$HOME/.local/bin"
+BOOTSTRAP_TUI_CONTROLLER_BIN="$BOOTSTRAP_TUI_LOCAL_BIN/bootstrap-controller"
+BOOTSTRAP_TUI_GO_VERSION="${BOOTSTRAP_TUI_GO_VERSION:-1.23.4}"
+
+bootstrap_tui_dotfiles_root() {
+    local script_dir
+    script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P 2>/dev/null || true)"
+    if [ -z "$script_dir" ]; then
+        return 1
+    fi
+    cd -- "$script_dir/.." && pwd -P 2>/dev/null || return 1
+}
+
+bootstrap_tui_export_local_bin() {
+    case ":${PATH:-}:" in
+        *":$BOOTSTRAP_TUI_LOCAL_BIN:"*) return 0 ;;
+    esac
+    export PATH="$BOOTSTRAP_TUI_LOCAL_BIN${PATH:+:$PATH}"
+}
+
+bootstrap_tui_go_on_path() {
+    command -v go >/dev/null 2>&1
+}
+
+bootstrap_tui_go_platform() {
+    local os_name arch
+    case "$(uname -s 2>/dev/null || echo unknown)" in
+        Linux) os_name="linux" ;;
+        Darwin) os_name="darwin" ;;
+        *)
+            printf 'tui-go-unsupported-os:%s\n' "$(uname -s 2>/dev/null || echo unknown)" >&2
+            return 1
+            ;;
+    esac
+    case "$(uname -m 2>/dev/null || echo unknown)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *)
+            printf 'tui-go-unsupported-arch:%s\n' "$(uname -m 2>/dev/null || echo unknown)" >&2
+            return 1
+            ;;
+    esac
+    printf '%s-%s\n' "$os_name" "$arch"
+}
+
+bootstrap_tui_install_go() {
+    local platform tarball_url tarball_path extract_root
+    platform="$(bootstrap_tui_go_platform)" || return 1
+    tarball_url="https://go.dev/dl/go${BOOTSTRAP_TUI_GO_VERSION}.${platform}.tar.gz"
+    tarball_path="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/bootstrap-go.$$.tar.gz")"
+    if [ -z "$tarball_path" ] || ! : >"$tarball_path" 2>/dev/null; then
+        printf 'tui-go-tempfile-failed\n' >&2
+        return 1
+    fi
+
+    info "Downloading Go ${BOOTSTRAP_TUI_GO_VERSION} (${platform})"
+    if ! command -v curl >/dev/null 2>&1; then
+        printf 'tui-go-curl-missing\n' >&2
+        rm -f "$tarball_path"
+        return 1
+    fi
+    if ! curl -fsSL --retry 3 -o "$tarball_path" "$tarball_url"; then
+        printf 'tui-go-download-failed:%s\n' "$tarball_url" >&2
+        rm -f "$tarball_path"
+        return 1
+    fi
+
+    extract_root="$(dirname -- "$BOOTSTRAP_TUI_GO_DEST")"
+    mkdir -p "$extract_root"
+    info "Extracting Go into $extract_root"
+    if ! tar -C "$extract_root" -xzf "$tarball_path"; then
+        printf 'tui-go-extract-failed\n' >&2
+        rm -f "$tarball_path"
+        return 1
+    fi
+    rm -f "$tarball_path"
+
+    if [ ! -x "$BOOTSTRAP_TUI_GO_DEST/bin/go" ]; then
+        printf 'tui-go-install-failed\n' >&2
+        return 1
+    fi
+
+    ok "Go installed at $BOOTSTRAP_TUI_GO_DEST"
+}
+
+bootstrap_tui_link_go_binaries() {
+    local src_dir="$BOOTSTRAP_TUI_GO_DEST/bin"
+    local dst_dir="$BOOTSTRAP_TUI_LOCAL_BIN"
+    local binary link
+
+    if [ ! -d "$src_dir" ]; then
+        return 0
+    fi
+
+    mkdir -p "$dst_dir"
+    for binary in go gofmt; do
+        if [ ! -x "$src_dir/$binary" ]; then
+            continue
+        fi
+        link="$dst_dir/$binary"
+        if [ -L "$link" ] || [ -e "$link" ]; then
+            rm -f "$link"
+        fi
+        if ! ln -s "$src_dir/$binary" "$link"; then
+            printf 'tui-go-symlink-failed:%s\n' "$binary" >&2
+            return 1
+        fi
+    done
+}
+
+bootstrap_tui_ensure_go() {
+    if bootstrap_tui_go_on_path; then
+        return 0
+    fi
+
+    if [ ! -x "$BOOTSTRAP_TUI_GO_DEST/bin/go" ]; then
+        if ! bootstrap_tui_install_go; then
+            warn "Could not install Go automatically. Install Go 1.23+ manually from https://go.dev/dl/ and re-run."
+            return 1
+        fi
+    else
+        info "Found Go at $BOOTSTRAP_TUI_GO_DEST"
+    fi
+
+    if ! bootstrap_tui_link_go_binaries; then
+        return 1
+    fi
+
+    if ! bootstrap_tui_go_on_path; then
+        printf 'tui-go-not-on-path\n' >&2
+        return 1
+    fi
+
+    ok "Go ready: $(command -v go)"
+}
+
+bootstrap_tui_ensure_controller() {
+    local dotfiles_root controller_source newer_source
+
+    dotfiles_root="$(bootstrap_tui_dotfiles_root)" || {
+        printf 'tui-controller-root-missing\n' >&2
+        return 1
+    }
+    controller_source="$dotfiles_root/cmd/bootstrap-controller"
+
+    if [ ! -d "$controller_source" ]; then
+        printf 'tui-controller-source-missing:%s\n' "$controller_source" >&2
+        return 1
+    fi
+
+    if [ -x "$BOOTSTRAP_TUI_CONTROLLER_BIN" ]; then
+        newer_source="$(find "$controller_source" -type f -name '*.go' -newer "$BOOTSTRAP_TUI_CONTROLLER_BIN" -print -quit 2>/dev/null || true)"
+        if [ -z "$newer_source" ]; then
+            return 0
+        fi
+        info "Rebuilding bootstrap-controller (sources newer than binary)"
+    else
+        info "Building bootstrap-controller"
+    fi
+
+    mkdir -p "$BOOTSTRAP_TUI_LOCAL_BIN"
+    if ! (cd -- "$dotfiles_root" && go build -o "$BOOTSTRAP_TUI_CONTROLLER_BIN" ./cmd/bootstrap-controller); then
+        printf 'tui-controller-build-failed\n' >&2
+        return 1
+    fi
+
+    if [ ! -x "$BOOTSTRAP_TUI_CONTROLLER_BIN" ]; then
+        printf 'tui-controller-build-failed\n' >&2
+        return 1
+    fi
+
+    ok "bootstrap-controller built at $BOOTSTRAP_TUI_CONTROLLER_BIN"
+}
+
+bootstrap_command_tui() {
+    bootstrap_tui_export_local_bin
+
+    if ! bootstrap_tui_ensure_go; then
+        return 1
+    fi
+
+    if ! bootstrap_tui_ensure_controller; then
+        return 1
+    fi
+
+    # Test-only path: capture the would-be exec command instead of exec'ing
+    # it. Used by bootstrap_self_test to verify the dispatch without network
+    # or a real Go toolchain. The prereq checks above still run so the test
+    # can also exercise the failure paths.
+    if [ "${BOOTSTRAP_TUI_TEST_NO_EXEC:-0}" = "1" ]; then
+        BOOTSTRAP_TUI_TEST_CAPTURED_CMD="$BOOTSTRAP_TUI_CONTROLLER_BIN $*"
+        return 0
+    fi
+
+    info "Launching bootstrap-controller"
+    exec "$BOOTSTRAP_TUI_CONTROLLER_BIN" "$@"
 }
 
 bootstrap_self_test() {
@@ -1909,6 +2132,160 @@ PY
         return 1
     fi
 
+    # === TUI launcher self-test ===
+    # Verify argument parsing, dispatch path, and prerequisite checks without
+    # touching the network or invoking the real Go toolchain. The test mode
+    # hook in bootstrap_command_tui captures the would-be exec command so the
+    # self-test stays hermetic.
+    local saved_bootstrap_command_tui
+    local saved_bootstrap_tui_ensure_go
+    local saved_bootstrap_tui_ensure_controller
+    local saved_bootstrap_tui_install_go
+    local saved_bootstrap_tui_dotfiles_root
+    local saved_path
+
+    saved_bootstrap_command_tui="$(declare -f bootstrap_command_tui)"
+    saved_bootstrap_tui_ensure_go="$(declare -f bootstrap_tui_ensure_go)"
+    saved_bootstrap_tui_ensure_controller="$(declare -f bootstrap_tui_ensure_controller)"
+    saved_bootstrap_tui_install_go="$(declare -f bootstrap_tui_install_go)"
+    saved_bootstrap_tui_dotfiles_root="$(declare -f bootstrap_tui_dotfiles_root)"
+
+    BOOTSTRAP_COMMAND=""
+    BOOTSTRAP_ONLY_CSV=""
+    BOOTSTRAP_FRONTEND_MODE=""
+    bootstrap_parse_args tui --only brew-tools
+    if [ "$BOOTSTRAP_COMMAND" != "tui" ]; then
+        err "Expected bootstrap_parse_args tui to set BOOTSTRAP_COMMAND=tui (got: ${BOOTSTRAP_COMMAND:-})"
+        return 1
+    fi
+    if [ "${BOOTSTRAP_FRONTEND_MODE:-}" != "tui" ]; then
+        err "Expected BOOTSTRAP_FRONTEND_MODE=tui after parsing tui args"
+        return 1
+    fi
+
+    BOOTSTRAP_COMMAND=""
+    bootstrap_parse_args tui --help
+    if [ "$BOOTSTRAP_COMMAND" != "tui" ]; then
+        err "Expected --help after tui to keep BOOTSTRAP_COMMAND=tui (got: ${BOOTSTRAP_COMMAND:-})"
+        return 1
+    fi
+
+    BOOTSTRAP_COMMAND=""
+    bootstrap_parse_args tui
+    if [ "$BOOTSTRAP_COMMAND" != "tui" ]; then
+        err "Expected tui with no args to set BOOTSTRAP_COMMAND=tui"
+        return 1
+    fi
+
+    local detected_platform
+    if ! detected_platform="$(bootstrap_tui_go_platform 2>/dev/null)"; then
+        err "Expected bootstrap_tui_go_platform to succeed on the current platform"
+        return 1
+    fi
+    case "$detected_platform" in
+        linux-amd64|linux-arm64|darwin-amd64|darwin-arm64) ;;
+        *)
+            err "Unexpected bootstrap_tui_go_platform value: $detected_platform"
+            return 1
+            ;;
+    esac
+
+    local resolved_root
+    if ! resolved_root="$(bootstrap_tui_dotfiles_root 2>/dev/null)"; then
+        err "Expected bootstrap_tui_dotfiles_root to succeed from install.sh"
+        return 1
+    fi
+    if [ ! -d "$resolved_root/cmd/bootstrap-controller" ]; then
+        err "Expected resolved root to contain cmd/bootstrap-controller, got: $resolved_root"
+        return 1
+    fi
+
+    saved_path="$PATH"
+    PATH="/usr/bin:/bin"
+    bootstrap_tui_export_local_bin
+    local path_after_first="$PATH"
+    bootstrap_tui_export_local_bin
+    if [ "$path_after_first" != "$PATH" ]; then
+        err "Expected bootstrap_tui_export_local_bin to be idempotent"
+        PATH="$saved_path"
+        return 1
+    fi
+    PATH="$saved_path"
+
+    bootstrap_tui_ensure_go() { return 0; }
+    bootstrap_tui_ensure_controller() { return 0; }
+    BOOTSTRAP_TUI_TEST_NO_EXEC=1
+    BOOTSTRAP_TUI_TEST_CAPTURED_CMD=""
+
+    bootstrap_command_tui --only brew-tools
+    if [ -z "$BOOTSTRAP_TUI_TEST_CAPTURED_CMD" ]; then
+        err "Expected bootstrap_command_tui to capture the launch command"
+        return 1
+    fi
+    case "$BOOTSTRAP_TUI_TEST_CAPTURED_CMD" in
+        *"bootstrap-controller"*"--only brew-tools"*) ;;
+        *)
+            err "Expected captured command to forward --only brew-tools, got: $BOOTSTRAP_TUI_TEST_CAPTURED_CMD"
+            return 1
+            ;;
+    esac
+
+    BOOTSTRAP_TUI_TEST_CAPTURED_CMD=""
+    bootstrap_command_tui --bogus
+    case "$BOOTSTRAP_TUI_TEST_CAPTURED_CMD" in
+        *"--bogus"*) ;;
+        *)
+            err "Expected unknown args to be forwarded to bootstrap-controller (let it reject), got: $BOOTSTRAP_TUI_TEST_CAPTURED_CMD"
+            return 1
+            ;;
+    esac
+
+    BOOTSTRAP_TUI_TEST_CAPTURED_CMD=""
+    bootstrap_command_tui
+    case "$BOOTSTRAP_TUI_TEST_CAPTURED_CMD" in
+        *"bootstrap-controller"*) ;;
+        *)
+            err "Expected no-arg tui to launch bootstrap-controller, got: $BOOTSTRAP_TUI_TEST_CAPTURED_CMD"
+            return 1
+            ;;
+    esac
+
+    bootstrap_tui_ensure_go() {
+        printf 'tui-go-not-on-path\n' >&2
+        return 1
+    }
+    bootstrap_tui_ensure_controller() { return 0; }
+    if bootstrap_command_tui >/tmp/bootstrap-tui-no-go.out 2>&1; then
+        err "Expected tui to fail when ensure_go fails"
+        return 1
+    fi
+    if ! grep -q 'tui-go-not-on-path' /tmp/bootstrap-tui-no-go.out; then
+        err "Expected tui to surface tui-go-not-on-path on Go failure"
+        return 1
+    fi
+
+    bootstrap_tui_ensure_go() { return 0; }
+    bootstrap_tui_ensure_controller() {
+        printf 'tui-controller-build-failed\n' >&2
+        return 1
+    }
+    if bootstrap_command_tui >/tmp/bootstrap-tui-no-build.out 2>&1; then
+        err "Expected tui to fail when ensure_controller fails"
+        return 1
+    fi
+    if ! grep -q 'tui-controller-build-failed' /tmp/bootstrap-tui-no-build.out; then
+        err "Expected tui to surface tui-controller-build-failed on build failure"
+        return 1
+    fi
+
+    eval "$saved_bootstrap_command_tui"
+    eval "$saved_bootstrap_tui_ensure_go"
+    eval "$saved_bootstrap_tui_ensure_controller"
+    eval "$saved_bootstrap_tui_install_go"
+    eval "$saved_bootstrap_tui_dotfiles_root"
+    unset BOOTSTRAP_TUI_TEST_NO_EXEC BOOTSTRAP_TUI_TEST_CAPTURED_CMD
+    ok "Bootstrap TUI launcher self-test passed"
+
     BOOTSTRAP_TARGET_USER="$saved_bootstrap_target_user"
     BOOTSTRAP_TARGET_HOME="$saved_bootstrap_target_home"
     BOOTSTRAP_TEST_MODE_ACTIVE="$saved_bootstrap_test_mode_active"
@@ -1925,7 +2302,7 @@ main() {
         BOOTSTRAP_TEST_MODE=1
     fi
 
-    if [ "${BOOTSTRAP_COMMAND:-apply}" != controller ]; then
+    if [ "${BOOTSTRAP_COMMAND:-apply}" != controller ] && [ "${BOOTSTRAP_COMMAND:-apply}" != tui ]; then
         echo ""
         printf '\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n'
         printf '\033[1m  Dotfiles Bootstrap\033[0m\n'
@@ -1935,7 +2312,7 @@ main() {
     fi
 
     case "${1:-}" in
-        plan|apply|list|controller|test|help|-h|--help)
+        plan|apply|list|controller|test|tui|help|-h|--help)
             ;;
         "")
             set -- apply
@@ -1962,13 +2339,17 @@ main() {
             shift
             bootstrap_command_controller "$@"
             ;;
+        tui)
+            shift
+            bootstrap_command_tui "$@"
+            ;;
         test)
             shift
             bootstrap_self_test "$@"
             ;;
         help|-h|--help)
             cat <<'EOF'
-Usage: installer/install.sh [plan|apply|list|controller|test] [selectors]
+Usage: installer/install.sh [plan|apply|list|controller|test|tui] [selectors]
 
 Commands:
   plan   Compute a deterministic bootstrap plan
@@ -1976,6 +2357,7 @@ Commands:
   list   List the catalog and current advisory status
   controller  Respond to an optional Go controller handshake request
   test   Run planner self-checks
+  tui    Launch the optional Go controller/TUI (auto-installs Go user-locally)
 
 Selectors:
   --only ACTION[,ACTION...]
@@ -1983,6 +2365,12 @@ Selectors:
   --force ACTION[,ACTION...]
   --format text|json
   --plan FILE
+
+The `tui` command is a thin launcher for the optional Go controller. It
+detects Go on PATH and falls back to a user-local install at ~/.local/go
+(symlinked into ~/.local/bin) before building and exec'ing
+`bootstrap-controller`. Run the shell bootstrap directly for the default
+behavior — `tui` is opt-in.
 EOF
             ;;
     esac
