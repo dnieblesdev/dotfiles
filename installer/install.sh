@@ -1042,12 +1042,12 @@ bootstrap_command_tui() {
     # or a real Go toolchain. The prereq checks above still run so the test
     # can also exercise the failure paths.
     if [ "${BOOTSTRAP_TUI_TEST_NO_EXEC:-0}" = "1" ]; then
-        BOOTSTRAP_TUI_TEST_CAPTURED_CMD="$BOOTSTRAP_TUI_CONTROLLER_BIN $*"
+        BOOTSTRAP_TUI_TEST_CAPTURED_CMD="$BOOTSTRAP_TUI_CONTROLLER_BIN --shell $SCRIPT_DIR/install.sh $*"
         return 0
     fi
 
     info "Launching bootstrap-controller"
-    exec "$BOOTSTRAP_TUI_CONTROLLER_BIN" "$@"
+    exec "$BOOTSTRAP_TUI_CONTROLLER_BIN" --shell "$SCRIPT_DIR/install.sh" "$@"
 }
 
 bootstrap_self_test() {
