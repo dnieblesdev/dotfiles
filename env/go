@@ -1,0 +1,13 @@
+# ──────────────────────────────────────────────
+# Go toolchain
+# ──────────────────────────────────────────────
+#
+# User-local install at $HOME/.local/go.
+# The binaries are symlinked into $HOME/.local/bin
+# so the toolchain is on PATH without further setup.
+
+# Helpers shared by Bash and Zsh.
+[ -f "$HOME/.dotfiles/env/path.sh" ] && . "$HOME/.dotfiles/env/path.sh"
+
+export GOROOT="$HOME/.local/go"
+path_prepend "$GOROOT/bin"
