@@ -12,6 +12,7 @@ BOOTSTRAP_ACTION_ORDER=(
     dotfiles-clone
     dotfiles-backup
     dotfiles-link
+    runtime-go
     runtime-nvm
     runtime-uv
     runtime-rustup
@@ -24,6 +25,7 @@ declare -A BOOTSTRAP_ACTION_LABELS=(
     [dotfiles-clone]="Clone or update dotfiles repo"
     [dotfiles-backup]="Back up existing shell files"
     [dotfiles-link]="Link dotfiles into the home directory"
+    [runtime-go]="Install Go runtime"
     [runtime-nvm]="Install nvm runtime manager"
     [runtime-uv]="Install uv runtime manager"
     [runtime-rustup]="Install rustup runtime manager"
@@ -36,6 +38,7 @@ declare -A BOOTSTRAP_ACTION_GROUPS=(
     [dotfiles-clone]="dotfiles"
     [dotfiles-backup]="dotfiles"
     [dotfiles-link]="dotfiles"
+    [runtime-go]="runtime"
     [runtime-nvm]="runtime"
     [runtime-uv]="runtime"
     [runtime-rustup]="runtime"
@@ -48,6 +51,7 @@ declare -A BOOTSTRAP_ACTION_DEPS=(
     [dotfiles-clone]="system-packages"
     [dotfiles-backup]="dotfiles-clone"
     [dotfiles-link]="dotfiles-clone dotfiles-backup"
+    [runtime-go]="system-packages"
     [runtime-nvm]="system-packages"
     [runtime-uv]="system-packages"
     [runtime-rustup]="system-packages"
@@ -60,6 +64,7 @@ declare -A BOOTSTRAP_ACTION_PRIVILEGES=(
     [dotfiles-clone]="user"
     [dotfiles-backup]="user"
     [dotfiles-link]="user"
+    [runtime-go]="user"
     [runtime-nvm]="user"
     [runtime-uv]="user"
     [runtime-rustup]="user"
@@ -77,7 +82,7 @@ bootstrap_action_known() {
     action="$(bootstrap_action_normalize "$action")"
 
     case "$action" in
-        system-packages|homebrew-bootstrap|brew-tools|dotfiles-clone|dotfiles-backup|dotfiles-link|runtime-nvm|runtime-uv|runtime-rustup)
+        system-packages|homebrew-bootstrap|brew-tools|dotfiles-clone|dotfiles-backup|dotfiles-link|runtime-go|runtime-nvm|runtime-uv|runtime-rustup)
             return 0
             ;;
     esac

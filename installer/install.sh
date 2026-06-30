@@ -370,6 +370,21 @@ install_rustup_runtime() {
     fi
 }
 
+install_go_runtime() {
+    if bootstrap_tui_go_on_path; then
+        info "Go already installed: $(command -v go)"
+        return 0
+    fi
+
+    bootstrap_tui_export_local_bin
+    if bootstrap_tui_ensure_go; then
+        return 0
+    fi
+
+    warn "Could not install or expose Go automatically. Continuing without Go."
+    return 0
+}
+
 bootstrap_run_action() {
     local action="$1"
 
@@ -391,6 +406,9 @@ bootstrap_run_action() {
             ;;
         dotfiles-link)
             link_dotfiles
+            ;;
+        runtime-go)
+            install_go_runtime
             ;;
         runtime-nvm)
             install_nvm_runtime
@@ -2132,23 +2150,160 @@ PY
         return 1
     fi
 
-    # === TUI launcher self-test ===
-    # Verify argument parsing, dispatch path, and prerequisite checks without
-    # touching the network or invoking the real Go toolchain. The test mode
-    # hook in bootstrap_command_tui captures the would-be exec command so the
-    # self-test stays hermetic.
+    # === Go runtime and TUI launcher self-test ===
+    # Verify Go runtime catalog coverage, PATH exposure, argument parsing,
+    # dispatch path, and prerequisite checks without touching the network or
+    # invoking the real Go toolchain. The test mode hook in bootstrap_command_tui
+    # captures the would-be exec command so the self-test stays hermetic.
     local saved_bootstrap_command_tui
     local saved_bootstrap_tui_ensure_go
     local saved_bootstrap_tui_ensure_controller
     local saved_bootstrap_tui_install_go
     local saved_bootstrap_tui_dotfiles_root
     local saved_path
+    local saved_bootstrap_tui_go_dest
+    local saved_bootstrap_tui_local_bin
+    local saved_home
+    local saved_goroot
 
     saved_bootstrap_command_tui="$(declare -f bootstrap_command_tui)"
     saved_bootstrap_tui_ensure_go="$(declare -f bootstrap_tui_ensure_go)"
     saved_bootstrap_tui_ensure_controller="$(declare -f bootstrap_tui_ensure_controller)"
     saved_bootstrap_tui_install_go="$(declare -f bootstrap_tui_install_go)"
     saved_bootstrap_tui_dotfiles_root="$(declare -f bootstrap_tui_dotfiles_root)"
+    saved_bootstrap_tui_go_dest="$BOOTSTRAP_TUI_GO_DEST"
+    saved_bootstrap_tui_local_bin="$BOOTSTRAP_TUI_LOCAL_BIN"
+
+    if ! bootstrap_action_known runtime-go; then
+        err "Expected runtime-go to be a known catalog action"
+        return 1
+    fi
+
+    BOOTSTRAP_FRONTEND_MODE=apply
+    BOOTSTRAP_STATE_FILE="$temp_state" bootstrap_plan_compute "runtime-go" "" ""
+    if ! bootstrap_array_contains "runtime-go" "${BOOTSTRAP_PLAN_ORDERED[@]}"; then
+        err "Expected runtime-go in dependency closure"
+        return 1
+    fi
+
+    plan_json="$(bootstrap_plan_emit_json)"
+    python3 - "$plan_json" <<'PY'
+import json, sys
+
+plan = json.loads(sys.argv[1])
+actions = {a['id']: a for a in plan['actions']}
+assert actions['runtime-go']['group'] == 'runtime', actions['runtime-go']
+assert actions['runtime-go']['privilege'] == 'user', actions['runtime-go']
+PY
+
+    local temp_go_dest temp_go_local_bin
+    temp_go_dest="$temp_dir/go"
+    temp_go_local_bin="$temp_dir/local-bin"
+    mkdir -p "$temp_go_dest/bin" "$temp_go_local_bin"
+    printf '#!/usr/bin/env bash\nprintf "fake-go\\n"\n' >"$temp_go_dest/bin/go"
+    printf '#!/usr/bin/env bash\nprintf "fake-gofmt\\n"\n' >"$temp_go_dest/bin/gofmt"
+    chmod +x "$temp_go_dest/bin/go" "$temp_go_dest/bin/gofmt"
+
+    BOOTSTRAP_TUI_GO_DEST="$temp_go_dest"
+    BOOTSTRAP_TUI_LOCAL_BIN="$temp_go_local_bin"
+    saved_path="$PATH"
+    PATH="/usr/bin:/bin"
+    if ! install_go_runtime >/tmp/bootstrap-runtime-go.out 2>&1; then
+        err "Expected runtime-go to succeed when Go exists outside PATH"
+        PATH="$saved_path"
+        return 1
+    fi
+    if [ "$(command -v go)" != "$temp_go_local_bin/go" ]; then
+        err "Expected runtime-go to expose user-local go on PATH"
+        PATH="$saved_path"
+        return 1
+    fi
+    if [ ! -L "$temp_go_local_bin/go" ] || [ ! -L "$temp_go_local_bin/gofmt" ]; then
+        err "Expected runtime-go to symlink go and gofmt into ~/.local/bin"
+        PATH="$saved_path"
+        return 1
+    fi
+    path_after_first="$PATH"
+    if ! install_go_runtime >/tmp/bootstrap-runtime-go-idempotent.out 2>&1; then
+        err "Expected runtime-go to be idempotent when Go is already on PATH"
+        PATH="$saved_path"
+        return 1
+    fi
+    if [ "$PATH" != "$path_after_first" ]; then
+        err "Expected runtime-go to leave PATH unchanged when Go is already available"
+        PATH="$saved_path"
+        return 1
+    fi
+    PATH="$saved_path"
+    BOOTSTRAP_TUI_GO_DEST="$saved_bootstrap_tui_go_dest"
+    BOOTSTRAP_TUI_LOCAL_BIN="$saved_bootstrap_tui_local_bin"
+
+    local temp_env_home temp_system_go_dir env_go_file
+    temp_env_home="$temp_dir/env-home"
+    temp_system_go_dir="$temp_dir/system-go/bin"
+    env_go_file="$SCRIPT_DIR/../env/go"
+    mkdir -p "$temp_env_home/.local/go/bin" "$temp_system_go_dir"
+    printf '#!/usr/bin/env bash\nprintf "home-go\\n"\n' >"$temp_env_home/.local/go/bin/go"
+    printf '#!/usr/bin/env bash\nprintf "system-go\\n"\n' >"$temp_system_go_dir/go"
+    chmod +x "$temp_env_home/.local/go/bin/go" "$temp_system_go_dir/go"
+
+    saved_home="$HOME"
+    saved_goroot="${GOROOT:-}"
+    saved_path="$PATH"
+
+    . "$SCRIPT_DIR/../env/path.sh"
+    HOME="$temp_env_home"
+    PATH="$temp_system_go_dir:/usr/bin:/bin"
+    GOROOT="$temp_dir/system-goroot"
+    path_after_first="$PATH"
+    . "$env_go_file"
+    if [ "$PATH" != "$path_after_first" ]; then
+        err "Expected env/go to leave PATH unchanged when Go is already available"
+        HOME="$saved_home"
+        PATH="$saved_path"
+        return 1
+    fi
+    if [ "$GOROOT" != "$temp_dir/system-goroot" ]; then
+        err "Expected env/go to preserve GOROOT when Go is already available"
+        HOME="$saved_home"
+        PATH="$saved_path"
+        return 1
+    fi
+
+    PATH="/usr/bin:/bin"
+    unset GOROOT
+    . "$env_go_file"
+    path_after_first="$PATH"
+    . "$env_go_file"
+    if [ "$PATH" != "$path_after_first" ]; then
+        err "Expected env/go PATH update to be idempotent"
+        HOME="$saved_home"
+        PATH="$saved_path"
+        return 1
+    fi
+    case ":$PATH:" in
+        *":$temp_env_home/.local/go/bin:"*) ;;
+        *)
+            err "Expected env/go to persist user-local Go when Go is missing from PATH"
+            HOME="$saved_home"
+            PATH="$saved_path"
+            return 1
+            ;;
+    esac
+    if [ "${GOROOT:-}" != "$temp_env_home/.local/go" ]; then
+        err "Expected env/go to set GOROOT for user-local Go fallback"
+        HOME="$saved_home"
+        PATH="$saved_path"
+        return 1
+    fi
+
+    HOME="$saved_home"
+    PATH="$saved_path"
+    if [ -n "$saved_goroot" ]; then
+        GOROOT="$saved_goroot"
+    else
+        unset GOROOT
+    fi
 
     BOOTSTRAP_COMMAND=""
     BOOTSTRAP_ONLY_CSV=""
@@ -2283,8 +2438,10 @@ PY
     eval "$saved_bootstrap_tui_ensure_controller"
     eval "$saved_bootstrap_tui_install_go"
     eval "$saved_bootstrap_tui_dotfiles_root"
+    BOOTSTRAP_TUI_GO_DEST="$saved_bootstrap_tui_go_dest"
+    BOOTSTRAP_TUI_LOCAL_BIN="$saved_bootstrap_tui_local_bin"
     unset BOOTSTRAP_TUI_TEST_NO_EXEC BOOTSTRAP_TUI_TEST_CAPTURED_CMD
-    ok "Bootstrap TUI launcher self-test passed"
+    ok "Bootstrap Go runtime and TUI launcher self-test passed"
 
     BOOTSTRAP_TARGET_USER="$saved_bootstrap_target_user"
     BOOTSTRAP_TARGET_HOME="$saved_bootstrap_target_home"
@@ -2357,7 +2514,7 @@ Commands:
   list   List the catalog and current advisory status
   controller  Respond to an optional Go controller handshake request
   test   Run planner self-checks
-  tui    Launch the optional Go controller/TUI (auto-installs Go user-locally)
+  tui    Launch the optional Go controller/TUI (reuses the user-local Go runtime)
 
 Selectors:
   --only ACTION[,ACTION...]
@@ -2366,11 +2523,11 @@ Selectors:
   --format text|json
   --plan FILE
 
-The `tui` command is a thin launcher for the optional Go controller. It
-detects Go on PATH and falls back to a user-local install at ~/.local/go
-(symlinked into ~/.local/bin) before building and exec'ing
-`bootstrap-controller`. Run the shell bootstrap directly for the default
-behavior — `tui` is opt-in.
+The default `apply` command includes runtime-go, which detects Go on PATH and
+otherwise installs Go user-locally at ~/.local/go, symlinking go/gofmt into
+~/.local/bin. The `tui` command is a thin launcher for the optional Go
+controller and reuses the same Go runtime helper before building and exec'ing
+`bootstrap-controller`.
 EOF
             ;;
     esac

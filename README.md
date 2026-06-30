@@ -38,7 +38,9 @@ Or run the full bootstrap:
 ~/.dotfiles/installer/install.sh
 ```
 
-Launch the optional Go controller/TUI instead (auto-installs Go user-locally if needed, then builds and execs `bootstrap-controller`):
+The normal bootstrap installs Go user-locally as part of the runtime phase when `go` is not already on `PATH`.
+
+Launch the optional Go controller/TUI instead (reuses that user-local Go runtime if needed, then builds and execs `bootstrap-controller`):
 
 ```bash
 ~/.dotfiles/installer/install.sh tui
@@ -51,7 +53,7 @@ Pass any controller flag through the launcher:
 ~/.dotfiles/installer/install.sh tui --only brew-tools
 ```
 
-The `tui` subcommand is opt-in. Running `install.sh` with no arguments still runs the default shell bootstrap. Override the Go version with `BOOTSTRAP_TUI_GO_VERSION` (default: `1.23.4`) before launching the TUI for the first time.
+The `tui` subcommand is opt-in. Running `install.sh` with no arguments still runs the default shell bootstrap, including the `runtime-go` action. Override the Go version with `BOOTSTRAP_TUI_GO_VERSION` (default: `1.23.4`) before the first Go runtime install.
 
 ## Bootstrap order
 
@@ -60,10 +62,10 @@ The bootstrap now follows a strict split:
 1. System packages from the distro package manager only (`apt` or `pacman`): `git`, `curl`, `wget`, `openssh`, build tools, `unzip`, and `tar`
 2. Homebrew bootstrap with explicit detection, install, verification, and `brew shellenv`
 3. Brew-managed developer tools for Linux/WSL: `eza`, `bat`, `fd`, `ripgrep`, `fzf`, `zoxide`, `starship`, `neovim`, `lazygit`, `bottom`, `dua`, and `tldr`
-4. Runtime managers kept separate from Brew: `nvm`, `uv`, and `rustup`
+4. Runtime managers kept separate from Brew: Go, `nvm`, `uv`, and `rustup`
 
 If Homebrew is missing or fails to install, the bootstrap warns clearly and skips only the brew-managed layer.
-The optional Go controller is launched explicitly with `bash installer/install.sh tui`, which auto-installs Go user-locally and builds the binary before exec'ing it.
+The optional Go controller is launched explicitly with `bash installer/install.sh tui`, which reuses the same user-local Go helper and builds the binary before exec'ing it.
 
 Install `zsh` separately if your distro does not already provide it.
 
@@ -120,6 +122,7 @@ The bootstrap installs the common interactive tools via Homebrew when available:
 Runtime managers stay separate from Brew:
 
 - `nvm`
+- Go
 - `uv`
 - `rustup`
 

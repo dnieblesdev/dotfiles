@@ -3,11 +3,12 @@
 # ──────────────────────────────────────────────
 #
 # User-local install at $HOME/.local/go.
-# The binaries are symlinked into $HOME/.local/bin
-# so the toolchain is on PATH without further setup.
+# If another Go is already on PATH, leave it alone.
 
 # Helpers shared by Bash and Zsh.
 [ -f "$HOME/.dotfiles/env/path.sh" ] && . "$HOME/.dotfiles/env/path.sh"
 
-export GOROOT="$HOME/.local/go"
-path_prepend "$GOROOT/bin"
+if ! command -v go >/dev/null 2>&1 && [ -x "$HOME/.local/go/bin/go" ]; then
+    export GOROOT="$HOME/.local/go"
+    path_prepend "$GOROOT/bin"
+fi

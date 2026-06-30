@@ -8,6 +8,9 @@
 # Rust / Cargo
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
+# Go
+[ -f "$HOME/.dotfiles/env/go" ] && . "$HOME/.dotfiles/env/go"
+
 # Java / Android SDK
 export JAVA_HOME="/home/dniebles/development/jdk"
 export ANDROID_HOME="/home/dniebles/Android/Sdk"
