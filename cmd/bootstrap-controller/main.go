@@ -26,7 +26,7 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 	var onlyCSV string
 	var prompt bool
 	var protocolVersion int
-	fs.StringVar(&shellPath, "shell", "", "path to bootstrap/install.sh")
+	fs.StringVar(&shellPath, "shell", "", "path to installer/install.sh")
 	fs.StringVar(&onlyCSV, "only", "", "comma-separated action ids to pass through to shell")
 	fs.BoolVar(&prompt, "prompt", false, "prompt for action selection instead of auto-selecting all")
 	fs.IntVar(&protocolVersion, "protocol-version", controller.ProtocolVersion, "controller protocol version")
@@ -109,7 +109,7 @@ func resolveShellPath(explicit string) (string, error) {
 	case os.Getenv("BOOTSTRAP_SHELL_PATH") != "":
 		candidate = os.Getenv("BOOTSTRAP_SHELL_PATH")
 	default:
-		candidate = filepath.Join(root, "bootstrap", "install.sh")
+		candidate = filepath.Join(root, "installer", "install.sh")
 	}
 
 	return validateShellPath(root, candidate)

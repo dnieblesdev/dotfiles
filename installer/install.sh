@@ -316,13 +316,13 @@ backup_existing_shell_files() {
 }
 
 link_dotfiles() {
-    chmod +x "$DOTFILES_DIR/bootstrap/dotlink"
-    "$DOTFILES_DIR/bootstrap/dotlink" bash git zsh config
+    chmod +x "$DOTFILES_DIR/installer/dotlink"
+    "$DOTFILES_DIR/installer/dotlink" bash git zsh config
 
     if is_wsl; then
-        "$DOTFILES_DIR/bootstrap/dotlink" wsl
+        "$DOTFILES_DIR/installer/dotlink" wsl
     elif is_linux; then
-        "$DOTFILES_DIR/bootstrap/dotlink" linux
+        "$DOTFILES_DIR/installer/dotlink" linux
     fi
 
     ok "Dotfiles linked"
@@ -529,7 +529,7 @@ bootstrap_confirm_root_warning() {
         esac
     fi
 
-    warn "Running bootstrap/install.sh as root is risky."
+    warn "Running installer/install.sh as root is risky."
     warn "Re-run as a non-root user to keep brew-managed tools user-owned by default."
     warn "Continuing as root will install system packages and may modify system files."
 
@@ -1968,7 +1968,7 @@ main() {
             ;;
         help|-h|--help)
             cat <<'EOF'
-Usage: bootstrap/install.sh [plan|apply|list|controller|test] [selectors]
+Usage: installer/install.sh [plan|apply|list|controller|test] [selectors]
 
 Commands:
   plan   Compute a deterministic bootstrap plan

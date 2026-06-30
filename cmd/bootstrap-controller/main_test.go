@@ -56,11 +56,11 @@ func TestOutdatedGoFallsBackToShell(t *testing.T) {
 
 func TestControllerDoesNotRequireStateOrCatalogFiles(t *testing.T) {
 	root := t.TempDir()
-	bootstrapDir := filepath.Join(root, "bootstrap")
-	if err := os.MkdirAll(bootstrapDir, 0o755); err != nil {
+	installerDir := filepath.Join(root, "installer")
+	if err := os.MkdirAll(installerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := writeFakeShellAt(t, filepath.Join(bootstrapDir, "install.sh"), "ok")
+	shellPath := writeFakeShellAt(t, filepath.Join(installerDir, "install.sh"), "ok")
 	stdout, stderr, code := runController(t, []string{"--shell", shellPath}, "")
 	if code != 0 {
 		t.Fatalf("expected success without lib files, got code %d stderr=%s", code, stderr)
@@ -68,21 +68,21 @@ func TestControllerDoesNotRequireStateOrCatalogFiles(t *testing.T) {
 	if !strings.Contains(stdout, "Go controller handshake ok") {
 		t.Fatalf("expected handshake banner, got %s", stdout)
 	}
-	if _, err := os.Stat(filepath.Join(root, "bootstrap", "lib", "state.sh")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "installer", "lib", "state.sh")); !os.IsNotExist(err) {
 		t.Fatalf("expected no direct dependency on state.sh, stat err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "bootstrap", "lib", "catalog.sh")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "installer", "lib", "catalog.sh")); !os.IsNotExist(err) {
 		t.Fatalf("expected no direct dependency on catalog.sh, stat err=%v", err)
 	}
 }
 
 func TestValidateShellPathAcceptsShellInTrustedRoot(t *testing.T) {
 	trustedRoot := t.TempDir()
-	bootstrapDir := filepath.Join(trustedRoot, "bootstrap")
-	if err := os.MkdirAll(bootstrapDir, 0o755); err != nil {
+	installerDir := filepath.Join(trustedRoot, "installer")
+	if err := os.MkdirAll(installerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := writeFakeShellAt(t, filepath.Join(bootstrapDir, "install.sh"), "ok")
+	shellPath := writeFakeShellAt(t, filepath.Join(installerDir, "install.sh"), "ok")
 
 	resolved, err := validateShellPath(trustedRoot, shellPath)
 	if err != nil {
@@ -96,11 +96,11 @@ func TestValidateShellPathAcceptsShellInTrustedRoot(t *testing.T) {
 func TestValidateShellPathRejectsShellOutsideTrustedRoot(t *testing.T) {
 	trustedRoot := t.TempDir()
 	otherRoot := t.TempDir()
-	otherBootstrap := filepath.Join(otherRoot, "bootstrap")
-	if err := os.MkdirAll(otherBootstrap, 0o755); err != nil {
+	otherInstaller := filepath.Join(otherRoot, "installer")
+	if err := os.MkdirAll(otherInstaller, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := writeFakeShellAt(t, filepath.Join(otherBootstrap, "install.sh"), "ok")
+	shellPath := writeFakeShellAt(t, filepath.Join(otherInstaller, "install.sh"), "ok")
 
 	if _, err := validateShellPath(trustedRoot, shellPath); err == nil {
 		t.Fatalf("expected shell outside trusted root to be rejected")
@@ -112,11 +112,11 @@ func TestValidateShellPathRejectsNonExecutable(t *testing.T) {
 		t.Skip("unix permission bits are not enforced on windows")
 	}
 	trustedRoot := t.TempDir()
-	bootstrapDir := filepath.Join(trustedRoot, "bootstrap")
-	if err := os.MkdirAll(bootstrapDir, 0o755); err != nil {
+	installerDir := filepath.Join(trustedRoot, "installer")
+	if err := os.MkdirAll(installerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := filepath.Join(bootstrapDir, "install.sh")
+	shellPath := filepath.Join(installerDir, "install.sh")
 	if err := os.WriteFile(shellPath, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -134,11 +134,11 @@ func TestValidateShellPathRejectsWorldWritable(t *testing.T) {
 		t.Skip("root bypasses file mode checks")
 	}
 	trustedRoot := t.TempDir()
-	bootstrapDir := filepath.Join(trustedRoot, "bootstrap")
-	if err := os.MkdirAll(bootstrapDir, 0o755); err != nil {
+	installerDir := filepath.Join(trustedRoot, "installer")
+	if err := os.MkdirAll(installerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := filepath.Join(bootstrapDir, "install.sh")
+	shellPath := filepath.Join(installerDir, "install.sh")
 	if err := os.WriteFile(shellPath, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -155,11 +155,11 @@ func TestValidateShellPathRejectsWorldWritable(t *testing.T) {
 
 func TestValidateShellPathRejectsMissingFile(t *testing.T) {
 	trustedRoot := t.TempDir()
-	bootstrapDir := filepath.Join(trustedRoot, "bootstrap")
-	if err := os.MkdirAll(bootstrapDir, 0o755); err != nil {
+	installerDir := filepath.Join(trustedRoot, "installer")
+	if err := os.MkdirAll(installerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := filepath.Join(bootstrapDir, "install.sh")
+	shellPath := filepath.Join(installerDir, "install.sh")
 
 	if _, err := validateShellPath(trustedRoot, shellPath); err == nil {
 		t.Fatalf("expected missing shell to be rejected")
@@ -171,17 +171,17 @@ func TestValidateShellPathRejectsSymlinkEscape(t *testing.T) {
 		t.Skip("symlink behaviour differs on windows")
 	}
 	trustedRoot := t.TempDir()
-	bootstrapDir := filepath.Join(trustedRoot, "bootstrap")
-	if err := os.MkdirAll(bootstrapDir, 0o755); err != nil {
+	installerDir := filepath.Join(trustedRoot, "installer")
+	if err := os.MkdirAll(installerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	otherRoot := t.TempDir()
-	otherBootstrap := filepath.Join(otherRoot, "bootstrap")
-	if err := os.MkdirAll(otherBootstrap, 0o755); err != nil {
+	otherInstaller := filepath.Join(otherRoot, "installer")
+	if err := os.MkdirAll(otherInstaller, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	realShell := writeFakeShellAt(t, filepath.Join(otherBootstrap, "install.sh"), "ok")
-	linkPath := filepath.Join(bootstrapDir, "install.sh")
+	realShell := writeFakeShellAt(t, filepath.Join(otherInstaller, "install.sh"), "ok")
+	linkPath := filepath.Join(installerDir, "install.sh")
 	if err := os.Symlink(realShell, linkPath); err != nil {
 		t.Skipf("symlink unsupported in test environment: %v", err)
 	}
@@ -194,11 +194,11 @@ func TestValidateShellPathRejectsSymlinkEscape(t *testing.T) {
 func TestRunRejectsShellOutsideTrustedRoot(t *testing.T) {
 	trustedRoot := t.TempDir()
 	otherRoot := t.TempDir()
-	otherBootstrap := filepath.Join(otherRoot, "bootstrap")
-	if err := os.MkdirAll(otherBootstrap, 0o755); err != nil {
+	otherInstaller := filepath.Join(otherRoot, "installer")
+	if err := os.MkdirAll(otherInstaller, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := writeFakeShellAt(t, filepath.Join(otherBootstrap, "install.sh"), "ok")
+	shellPath := writeFakeShellAt(t, filepath.Join(otherInstaller, "install.sh"), "ok")
 
 	origResolver := dotfilesRootResolver
 	dotfilesRootResolver = func() (string, error) { return trustedRoot, nil }
@@ -217,11 +217,11 @@ func TestRunRejectsShellOutsideTrustedRoot(t *testing.T) {
 
 func TestRunAcceptsShellFromEnvVar(t *testing.T) {
 	trustedRoot := t.TempDir()
-	bootstrapDir := filepath.Join(trustedRoot, "bootstrap")
-	if err := os.MkdirAll(bootstrapDir, 0o755); err != nil {
+	installerDir := filepath.Join(trustedRoot, "installer")
+	if err := os.MkdirAll(installerDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	shellPath := writeFakeShellAt(t, filepath.Join(bootstrapDir, "install.sh"), "ok")
+	shellPath := writeFakeShellAt(t, filepath.Join(installerDir, "install.sh"), "ok")
 
 	origResolver := dotfilesRootResolver
 	dotfilesRootResolver = func() (string, error) { return trustedRoot, nil }
@@ -290,7 +290,7 @@ func TestSanitizeShellEnvDropsSecretsButKeepsBootstrap(t *testing.T) {
 func runController(t *testing.T, args []string, input string) (string, string, int) {
 	t.Helper()
 
-	// The fake shell lives at <root>/bootstrap/install.sh. Override the dotfiles
+	// The fake shell lives at <root>/installer/install.sh. Override the dotfiles
 	// root resolver so path validation accepts the test fixture. We extract the
 	// shell path from --shell when present; otherwise we fall back to a temp dir
 	// so tests that resolve the default path still find a valid trusted root.
@@ -298,7 +298,7 @@ func runController(t *testing.T, args []string, input string) (string, string, i
 	for i, arg := range args {
 		if arg == "--shell" && i+1 < len(args) {
 			shellDir := filepath.Dir(args[i+1])
-			if filepath.Base(shellDir) == "bootstrap" {
+			if filepath.Base(shellDir) == "installer" {
 				trustedRoot = filepath.Dir(shellDir)
 			}
 			break
@@ -317,7 +317,7 @@ func runController(t *testing.T, args []string, input string) (string, string, i
 func writeFakeShell(t *testing.T, mode string) string {
 	t.Helper()
 	root := t.TempDir()
-	return writeFakeShellAt(t, filepath.Join(root, "bootstrap", "install.sh"), mode)
+	return writeFakeShellAt(t, filepath.Join(root, "installer", "install.sh"), mode)
 }
 
 func writeFakeShellAt(t *testing.T, shellPath string, mode string) string {

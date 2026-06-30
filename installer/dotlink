@@ -167,7 +167,7 @@ list_status() {
         [ -d "$d" ] || continue
         local name
         name="$(basename "$d")"
-        [ "$name" = "bootstrap" ] && continue  # skip bootstrap/
+        [ "$name" = "installer" ] && continue  # skip installer/
         all_modules+=("$name")
     done
 
@@ -223,7 +223,7 @@ if [ $# -eq 0 ]; then
 fi
 
 for module in "$@"; do
-    [ "$module" = "bootstrap" ] && continue
+    [ "$module" = "installer" ] && continue
     echo -e "\033[1m[$module]\033[0m"
     if [ "$DELETE_MODE" = true ]; then
         delete_module "$module"
