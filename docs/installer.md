@@ -1,6 +1,6 @@
-# Bootstrap status
+# Installer guide
 
-This repository now has a shell-first bootstrap that can restore a machine from zero, re-run selectively, and keep a deterministic plan/state flow under `$XDG_STATE_HOME`.
+This guide is operational: commands, expected usage, and troubleshooting. For authority and design boundaries, read [`bootstrap-contract.md`](bootstrap-contract.md).
 
 ## Quick path
 
@@ -8,34 +8,29 @@ This repository now has a shell-first bootstrap that can restore a machine from 
 2. Run `~/.dotfiles/installer/install.sh`.
 3. Use `plan`, `list`, or `apply` to re-run selected actions later.
 4. Link optional shell layers with `dotlink` when needed.
-5. Launch the optional Go controller with `~/.dotfiles/installer/install.sh tui` (reuses the user-local Go runtime if needed).
+5. Launch the optional Go controller with `~/.dotfiles/installer/install.sh tui` only when you want the frontend path.
 
 ## Details
 
-| Area | Decision |
-|------|----------|
-| Shell core | Bash remains the canonical fallback and source of truth. |
-| Optional UI | A future Go frontend is optional and must consume the same shell contract. |
-| System tools | Install through the distro package manager (`apt` or `pacman`). |
-| Dev tools | Install through Homebrew when available. |
-| Runtimes | Keep separate (`rustup`, `uv`, and the chosen Node manager path). |
-| Privileges | Resolve per action; only elevate when the action truly needs it. |
-| Plan/state | Advisory state lives under `$XDG_STATE_HOME` and is tamper-evident. |
-| Go runtime | Normal `apply` installs or exposes user-local Go when `go` is not already on `PATH`. |
-| Optional Go UI | `bootstrap-controller` is a thin frontend only; shell remains the source of truth. |
+| Task | Command |
+|------|---------|
+| Default bootstrap | `~/.dotfiles/installer/install.sh` |
+| Preview plan | `~/.dotfiles/installer/install.sh plan` |
+| List actions and status | `~/.dotfiles/installer/install.sh list` |
+| Run selected actions | `~/.dotfiles/installer/install.sh apply --only ACTION[,ACTION...]` |
+| Skip selected actions | `~/.dotfiles/installer/install.sh apply --skip ACTION[,ACTION...]` |
+| Launch optional frontend | `~/.dotfiles/installer/install.sh tui` |
 
-## Known debt
+For action groups, privilege boundaries, state signing, and frontend authority, use [`bootstrap-contract.md`](bootstrap-contract.md).
 
-The bootstrap is usable, but the following hardening items remain intentionally deferred:
+## Troubleshooting notes
 
-- replay/state provenance still deserves a dedicated follow-up review
-- optional Go controller falls back to shell when the handshake is missing or outdated
+Known deferred hardening work is tracked in [`roadmap.md`](roadmap.md). Operationally, remember:
 
-Completed in this slice:
-
-- explicit confirmation now gates sudo-mediated privileged dispatch
-- privileged child launches use a trusted fixed PATH allowlist
-- normal `apply` now includes `runtime-go`; `tui` reuses the same Go helper
+- The bootstrap does not change your default shell automatically.
+- If linked files look wrong, run `dotlink --list` or `dotlink --dry-run`.
+- If Homebrew is unavailable, brew-managed tools may be skipped while other phases continue.
+- The optional Go controller falls back to the shell path when its handshake is unavailable or incompatible.
 
 ## Checklist
 
@@ -47,7 +42,7 @@ Completed in this slice:
 
 ## Next step
 
-Harden the `tui` launcher for offline Go installation and signed bootstrap-controller builds.
+Use [`roadmap.md`](roadmap.md) for active/deferred work. Do not treat this guide as policy authority.
 
 ## Go runtime and optional controller path
 
@@ -62,12 +57,12 @@ bash installer/install.sh tui --only brew-tools  # forwards --only to bootstrap-
 bash installer/install.sh tui --help          # shows the controller's flag usage
 ```
 
-The launcher:
+The launcher operational path:
 
 1. Detects Go via `command -v go`. If missing, it reuses the user-local runtime helper. No sudo, no system package manager.
 2. Builds `bootstrap-controller` from `cmd/bootstrap-controller/` into `~/.local/bin/bootstrap-controller` if the binary is missing or older than its sources. The build is skipped when the binary is already up-to-date.
 3. `exec`s `bootstrap-controller`, forwarding every arg after `tui`. The controller then handshakes with `installer/install.sh controller`, reads the shell-owned catalog via `installer/install.sh list --format json`, and finally calls `installer/install.sh apply`.
 
-Default Go version is `1.23.4`. Override with `BOOTSTRAP_TUI_GO_VERSION` before the first Go runtime install. The default `install.sh` (no args or `apply`) remains the shell source of truth; `tui` is only the optional controller frontend.
+Default Go version is `1.23.4`. Override with `BOOTSTRAP_TUI_GO_VERSION` before the first Go runtime install. The default `install.sh` (no args or `apply`) remains the shell path; `tui` is only the optional controller frontend.
 
 Building or testing the optional Go controller locally still requires Go 1.23+ when developing it directly. End users do not need a pre-existing Go toolchain.
