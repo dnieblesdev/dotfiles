@@ -9,6 +9,13 @@ repo/
 
 # No trackear archivos de OpenCode
 .atl/
+.codegraph/
+
+# No trackear artefactos de autoskills
+.agents/
+skills-lock.json
+/.agents/
+/skills-lock.json
 
 # No trackear posibles secretos
 *.env
