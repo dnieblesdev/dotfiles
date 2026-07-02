@@ -3,7 +3,7 @@
 all: check test verify
 
 check:
-	@find . \( -name '*.sh' -o -path './bin/dotlink' \) -not -path './.git/*' -print0 | sort -z | xargs -0 -n1 bash -n --
+	@find bin dotlink scripts profiles env -type f \( -executable -o -name '*.sh' \) -print0 2>/dev/null | sort -z | xargs -0 -n1 bash -n --
 	@echo "shell syntax checks passed"
 
 test:

@@ -11,11 +11,18 @@ source "$REPO_ROOT/dotlink/manifest.sh"
 usage() {
     cat <<'USAGE'
 Usage:
-  bin/dotlink link [--profile NAME] [MODULE...]
+  bin/dotlink link [--profile NAME]
   bin/dotlink list [--profile NAME]
-  bin/dotlink status [--profile NAME] [MODULE...]
-  bin/dotlink unlink [--profile NAME] [MODULE...]
-  bin/dotlink verify [--profile NAME] [MODULE...]
+  bin/dotlink status [--profile NAME]
+  bin/dotlink unlink [--profile NAME]
+  bin/dotlink verify [--profile NAME]
+
+  bin/dotlink link MODULE...
+  bin/dotlink status MODULE...
+  bin/dotlink unlink MODULE...
+  bin/dotlink verify MODULE...
+
+--profile and explicit MODULE arguments are mutually exclusive.
 
 Dotlink manages repository-owned symlinks only. It never installs packages,
 runtimes, tools, or OS bootstrap dependencies.
@@ -27,25 +34,77 @@ warn() { printf 'dotlink: %s\n' "$1" >&2; }
 
 real_path() {
     local path="$1"
-    if command -v realpath >/dev/null 2>&1 && realpath -m / >/dev/null 2>&1; then
-        realpath -m "$path"
-    elif command -v python3 >/dev/null 2>&1; then
-        python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$path"
-    elif command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
-        readlink -f "$path"
-    else
-        # Fallback: normalize leading tilde and follow symlinks manually for existing paths.
-        # Non-existent paths are returned with tilde expansion but without . / .. collapse.
-        case "$path" in
-            ~/*) path="$HOME/${path#~/}" ;;
-            '~') path="$HOME" ;;
-        esac
-        if [ -e "$path" ]; then
-            (cd "$path" && pwd) 2>/dev/null || printf '%s\n' "$path"
-        else
-            printf '%s\n' "$path"
+    local result
+
+    # Expand ~ to $HOME up front, before any path resolution.
+    case "$path" in
+        '~'/*) path="$HOME/${path#\~/}" ;;
+        '~') path="$HOME" ;;
+    esac
+
+    if command -v realpath >/dev/null 2>&1; then
+        if result="$(realpath -m "$path" 2>/dev/null)"; then
+            printf '%s\n' "$result"
+            return
         fi
     fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        if result="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$path" 2>/dev/null)"; then
+            printf '%s\n' "$result"
+            return
+        fi
+    fi
+
+    if command -v readlink >/dev/null 2>&1; then
+        if result="$(readlink -f "$path" 2>/dev/null)"; then
+            printf '%s\n' "$result"
+            return
+        fi
+    fi
+
+    # Pure-shell fallback: normalize . and .. segments for any path.
+    __real_path_manual "$path"
+}
+
+__real_path_manual() {
+    local path="$1"
+    local -a stack=()
+    local segment is_absolute=0 saved_ifs
+
+    case "$path" in
+        /*) is_absolute=1 ;;
+    esac
+
+    while [ -n "$path" ]; do
+        segment="${path%%/*}"
+        path="${path#"$segment"}"
+        path="${path#/}"
+        case "$segment" in
+            ""|.) ;;
+            ..)
+                if [ "${#stack[@]}" -gt 0 ]; then
+                    unset 'stack[-1]'
+                elif [ "$is_absolute" -eq 0 ]; then
+                    stack+=("..")
+                fi
+                ;;
+            *)
+                stack+=("$segment")
+                ;;
+        esac
+    done
+
+    saved_ifs="$IFS"
+    IFS='/'
+    if [ "$is_absolute" -eq 1 ]; then
+        printf '/%s\n' "${stack[*]}"
+    elif [ "${#stack[@]}" -gt 0 ]; then
+        printf '%s\n' "${stack[*]}"
+    else
+        printf '.\n'
+    fi
+    IFS="$saved_ifs"
 }
 
 is_repo_path() {
@@ -113,8 +172,29 @@ collect_module_entries() {
     done < <(find "$src_dir" -mindepth 1 -maxdepth 1 -type d -name '.*' -print0 2>/dev/null | sort -z)
 }
 
+collect_orphaned_entries() {
+    local target link_target resolved_target
+
+    [ -d "$DOTLINK_HOME" ] || return 0
+
+    while IFS= read -r -d '' target; do
+        link_target="$(readlink "$target")"
+        case "$link_target" in
+            /*) resolved_target="$link_target" ;;
+            *)  resolved_target="$(dirname "$target")/$link_target" ;;
+        esac
+
+        # Only report repo-owned broken symlinks.
+        [ -e "$resolved_target" ] && continue
+        is_repo_path "$resolved_target" || continue
+
+        printf '%s\t%s\n' "$resolved_target" "$target"
+    done < <(find "$DOTLINK_HOME" -type l -print0 2>/dev/null)
+}
+
 resolve_modules() {
     local profile="base"
+    local profile_set=0
     local -a explicit=()
     local module
 
@@ -123,10 +203,12 @@ resolve_modules() {
             --profile)
                 [ $# -ge 2 ] || { warn "--profile requires a name"; return 2; }
                 profile="$2"
+                profile_set=1
                 shift 2
                 ;;
             --profile=*)
                 profile="${1#--profile=}"
+                profile_set=1
                 shift
                 ;;
             --help|-h)
@@ -143,6 +225,11 @@ resolve_modules() {
                 ;;
         esac
     done
+
+    if [ "$profile_set" -eq 1 ] && [ "${#explicit[@]}" -gt 0 ]; then
+        warn "cannot combine --profile with explicit modules"
+        return 2
+    fi
 
     if [ "${#explicit[@]}" -gt 0 ]; then
         for module in "${explicit[@]}"; do
@@ -204,25 +291,41 @@ cmd_list() {
 cmd_status() {
     local modules=("$@")
     local module src target state entries rc=0
+    local -A seen_targets=()
+
     for module in "${modules[@]}"; do
         entries="$(collect_module_entries "$module")" || return 1
         while IFS=$'\t' read -r src target; do
             [ -n "$src" ] || continue
+            seen_targets["$target"]=1
             state="$(entry_state "$src" "$target")"
             [ "$state" != conflict ] || rc=1
             printf '%s\t%s\t%s\n' "$state" "$module" "$target"
         done <<< "$entries"
     done
+
+    # Surface orphaned repo-owned broken symlinks as drift.
+    while IFS=$'\t' read -r src target; do
+        [ -n "$target" ] || continue
+        [ -z "${seen_targets[$target]:-}" ] || continue
+        state="$(entry_state "$src" "$target")"
+        [ "$state" != conflict ] || rc=1
+        printf '%s\t%s\t%s\n' "$state" "orphan" "$target"
+    done < <(collect_orphaned_entries)
+
     return "$rc"
 }
 
 cmd_verify() {
     local modules=("$@")
     local module src target state entries rc=0
+    local -A seen_targets=()
+
     for module in "${modules[@]}"; do
         entries="$(collect_module_entries "$module")" || return 1
         while IFS=$'\t' read -r src target; do
             [ -n "$src" ] || continue
+            seen_targets["$target"]=1
             state="$(entry_state "$src" "$target")"
             if [ "$state" != linked ]; then
                 rc=1
@@ -230,16 +333,31 @@ cmd_verify() {
             fi
         done <<< "$entries"
     done
+
+    # Orphaned repo-owned broken symlinks fail verification.
+    while IFS=$'\t' read -r src target; do
+        [ -n "$target" ] || continue
+        [ -z "${seen_targets[$target]:-}" ] || continue
+        state="$(entry_state "$src" "$target")"
+        if [ "$state" != linked ]; then
+            rc=1
+            printf '%s\t%s\t%s\n' "$state" "orphan" "$target"
+        fi
+    done < <(collect_orphaned_entries)
+
     return "$rc"
 }
 
 cmd_unlink() {
     local modules=("$@")
     local module src target state entries rc=0
+    local -A seen_targets=()
+
     for module in "${modules[@]}"; do
         entries="$(collect_module_entries "$module")" || return 1
         while IFS=$'\t' read -r src target; do
             [ -n "$src" ] || continue
+            seen_targets["$target"]=1
             state="$(entry_state "$src" "$target")"
             case "$state" in
                 linked)
@@ -254,12 +372,49 @@ cmd_unlink() {
             esac
         done <<< "$entries"
     done
+
+    # Remove orphaned repo-owned broken symlinks.
+    while IFS=$'\t' read -r src target; do
+        [ -n "$target" ] || continue
+        [ -z "${seen_targets[$target]:-}" ] || continue
+        state="$(entry_state "$src" "$target")"
+        case "$state" in
+            linked|drift)
+                rm "$target"
+                info "unlinked orphaned $target"
+                ;;
+            missing) ;;
+            *)
+                rc=1
+                warn "conflict: refusing to unlink $target"
+                ;;
+        esac
+    done < <(collect_orphaned_entries)
+
     return "$rc"
+}
+
+rollback_link() {
+    local target dir i
+    local -a sorted_dirs
+
+    for target in "${created[@]}"; do
+        [ -L "$target" ] && rm "$target"
+    done
+
+    # Remove created parent directories if empty. Sort so parents precede
+    # children, then iterate in reverse to remove children first.
+    mapfile -t sorted_dirs < <(printf '%s\n' "${created_dirs[@]}" | sort)
+    for (( i=${#sorted_dirs[@]}-1; i>=0; i-- )); do
+        dir="${sorted_dirs[$i]}"
+        rmdir "$dir" 2>/dev/null || true
+    done
 }
 
 cmd_link() {
     local modules=("$@")
     local created=()
+    local created_dirs=()
     local module src target state entries
 
     for module in "${modules[@]}"; do
@@ -270,20 +425,20 @@ cmd_link() {
             case "$state" in
                 linked) ;;
                 missing)
+                    local parent parent_existed=0
+                    parent="$(dirname "$target")"
+                    [ -d "$parent" ] && parent_existed=1
                     if ! ensure_parent_dir "$target" || ! ln -s "$src" "$target"; then
-                        for created_target in "${created[@]}"; do
-                            [ -L "$created_target" ] && rm "$created_target"
-                        done
+                        rollback_link
                         return 1
                     fi
+                    [ "$parent_existed" -eq 1 ] || created_dirs+=("$parent")
                     created+=("$target")
                     info "linked $target -> $src"
                     ;;
                 *)
                     warn "conflict: refusing to replace $target"
-                    for created_target in "${created[@]}"; do
-                        [ -L "$created_target" ] && rm "$created_target"
-                    done
+                    rollback_link
                     return 1
                     ;;
             esac
@@ -317,4 +472,6 @@ main() {
     esac
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi

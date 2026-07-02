@@ -167,4 +167,114 @@ assert_missing "$DOTLINK_HOME/.config/dotlink-test-a"
 [ -f "$DOTLINK_HOME/.config/dotlink-test-b" ] || { printf 'rollback conflict file was removed\n' >&2; exit 1; }
 grep -q 'local conflict' "$DOTLINK_HOME/.config/dotlink-test-b"
 
+# Profile path traversal rejection.
+for bad_profile in '../base' 'foo/bar' '.hidden'; do
+    if "$TMP_REPO/bin/dotlink" list --profile "$bad_profile" >"$TMP_ROOT/dotlink-bad-profile-${bad_profile//\//-}.out" 2>"$TMP_ROOT/dotlink-bad-profile-${bad_profile//\//-}.err"; then
+        printf 'expected invalid profile rejection for --profile %s\n' "$bad_profile" >&2
+        exit 1
+    fi
+    grep -q 'invalid profile name' "$TMP_ROOT/dotlink-bad-profile-${bad_profile//\//-}.err"
+done
+if "$TMP_REPO/bin/dotlink" list --profile= >"$TMP_ROOT/dotlink-bad-profile-empty.out" 2>"$TMP_ROOT/dotlink-bad-profile-empty.err"; then
+    printf 'expected invalid profile rejection for --profile=\n' >&2
+    exit 1
+fi
+grep -q 'invalid profile name' "$TMP_ROOT/dotlink-bad-profile-empty.err"
+
+# --profile and explicit modules are mutually exclusive.
+if "$TMP_REPO/bin/dotlink" link --profile base bash >"$TMP_ROOT/dotlink-profile-explicit.out" 2>"$TMP_ROOT/dotlink-profile-explicit.err"; then
+    printf 'expected --profile + explicit module rejection\n' >&2
+    exit 1
+fi
+grep -q 'cannot combine --profile with explicit modules' "$TMP_ROOT/dotlink-profile-explicit.err"
+if "$TMP_REPO/bin/dotlink" status --profile=base bash >"$TMP_ROOT/dotlink-profile-equals-explicit.out" 2>"$TMP_ROOT/dotlink-profile-equals-explicit.err"; then
+    printf 'expected --profile= + explicit module rejection\n' >&2
+    exit 1
+fi
+grep -q 'cannot combine --profile with explicit modules' "$TMP_ROOT/dotlink-profile-equals-explicit.err"
+
+# Source deleted after linking is reported as drift by orphan detection.
+"$TMP_REPO/bin/dotlink" link bash
+rm "$TMP_REPO/bash/.bashrc"
+"$TMP_REPO/bin/dotlink" status bash >"$TMP_ROOT/dotlink-deleted-status.out" 2>"$TMP_ROOT/dotlink-deleted-status.err"
+grep -q '^drift[[:space:]]' "$TMP_ROOT/dotlink-deleted-status.out"
+grep -q '.bashrc' "$TMP_ROOT/dotlink-deleted-status.out"
+if "$TMP_REPO/bin/dotlink" verify bash >"$TMP_ROOT/dotlink-deleted-verify.out" 2>"$TMP_ROOT/dotlink-deleted-verify.err"; then
+    printf 'expected verify failure after source deletion\n' >&2
+    exit 1
+fi
+grep -q '^drift[[:space:]]' "$TMP_ROOT/dotlink-deleted-verify.out"
+grep -q '.bashrc' "$TMP_ROOT/dotlink-deleted-verify.out"
+rm "$DOTLINK_HOME/.bashrc"
+
+# real_path fallback chain: readlink-only and pure-shell fallbacks.
+STUB_DIR="$TMP_ROOT/stubs"
+mkdir -p "$STUB_DIR"
+READLINK_BIN="$(command -v readlink)"
+
+cat > "$STUB_DIR/realpath" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$STUB_DIR/realpath"
+
+cat > "$STUB_DIR/python3" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$STUB_DIR/python3"
+
+cat > "$STUB_DIR/readlink" <<EOF
+#!/bin/sh
+exec "$READLINK_BIN" "\$@"
+EOF
+chmod +x "$STUB_DIR/readlink"
+
+(
+    PATH="$STUB_DIR"
+    hash -r
+    DOTLINK_REPO_ROOT="$TMP_REPO"
+    # shellcheck source=/dev/null
+    source "$TMP_REPO/dotlink/dotlink.sh"
+    [ "$(real_path "$TMP_REPO/bash/.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
+    [ "$(real_path "$TMP_REPO/bash/./.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
+    [ "$(real_path "~/foo")" = "$HOME/foo" ]
+)
+
+# Mask readlink too to exercise the pure-shell fallback.
+cat > "$STUB_DIR/readlink" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+
+(
+    PATH="$STUB_DIR"
+    hash -r
+    DOTLINK_REPO_ROOT="$TMP_REPO"
+    # shellcheck source=/dev/null
+    source "$TMP_REPO/dotlink/dotlink.sh"
+    [ "$(real_path "$TMP_REPO/bash/.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
+    [ "$(real_path "$TMP_REPO/bash/./.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
+    [ "$(real_path "~/foo")" = "$HOME/foo" ]
+    [ "$(real_path "foo/bar/../baz")" = "foo/baz" ]
+    [ "$(real_path "foo/bar/../baz/qux")" = "foo/baz/qux" ]
+    [ "$(real_path ".")" = "." ]
+)
+
+# Relative repo-owned symlink is recognized as linked.
+printf '# restored\n' > "$TMP_REPO/bash/.bashrc"
+ln -s "../repo/bash/.bashrc" "$DOTLINK_HOME/.bashrc"
+"$TMP_REPO/bin/dotlink" status bash >"$TMP_ROOT/dotlink-relative-status.out" 2>"$TMP_ROOT/dotlink-relative-status.err"
+grep -q '^linked[[:space:]]' "$TMP_ROOT/dotlink-relative-status.out"
+grep -q '.bashrc' "$TMP_ROOT/dotlink-relative-status.out"
+rm "$DOTLINK_HOME/.bashrc"
+
+# Makefile check handles paths containing spaces.
+cat > "$TMP_REPO/scripts/test file.sh" <<'EOF'
+#!/usr/bin/env bash
+echo ok
+EOF
+chmod +x "$TMP_REPO/scripts/test file.sh"
+(cd "$TMP_REPO" && make check) >"$TMP_ROOT/make-check-spaces.out" 2>"$TMP_ROOT/make-check-spaces.err"
+
 printf 'dotlink tests passed\n'

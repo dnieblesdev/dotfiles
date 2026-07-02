@@ -71,7 +71,10 @@ There is no local bootstrap command in this repository. A future sibling bootstr
 | Link repo modules into `$HOME` | `~/.dotfiles/bin/dotlink link --profile base` |
 | Inspect dotfile link state | `~/.dotfiles/bin/dotlink status --profile base` |
 | Remove repo-owned links | `~/.dotfiles/bin/dotlink unlink --profile base` |
+| Link explicit modules | `~/.dotfiles/bin/dotlink link bash git` |
 | Understand bootstrap boundary | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
+
+`--profile` and explicit module arguments are mutually exclusive.
 
 ## Safety notes
 
