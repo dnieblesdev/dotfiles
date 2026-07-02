@@ -2,19 +2,19 @@
 
 Personal dotfiles for a modular shell development environment across WSL and native Linux.
 
-This README is an entry map. For project authority, use the focused docs below; if README conflicts with a deeper doc, the deeper doc wins.
+This README is an entry map for dotfiles only. This repository owns configuration modules, declarative profiles, and symlink lifecycle; it does not own workstation bootstrap, package installation, runtime installation, or OS provisioning.
 
 ## Start here
 
 | Need | Read |
 |------|------|
 | Project purpose, boundaries, and non-goals | [`docs/vision.md`](docs/vision.md) |
-| Shell-first bootstrap contract | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
-| Install commands and troubleshooting | [`docs/installer.md`](docs/installer.md) |
+| Dotfiles/bootstrap authority boundary | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
+| External bootstrapper handoff | [`docs/bootstrapper-handoff.md`](docs/bootstrapper-handoff.md) |
 | Active and deferred work | [`docs/roadmap.md`](docs/roadmap.md) |
 | Durable architecture decisions | [`docs/decisions/`](docs/decisions/) |
 
-## Quick install
+## Quick path
 
 Clone the repository:
 
@@ -22,31 +22,31 @@ Clone the repository:
 git clone https://github.com/dnieblesdev/dotfiles.git ~/.dotfiles
 ```
 
-Link the active dotfiles:
+Link the base dotfiles profile:
 
 ```bash
-~/.dotfiles/installer/dotlink bash git
+~/.dotfiles/bin/dotlink link --profile base
 ```
 
-Link the optional Zsh interactive layer and Starship config:
+Link the optional interactive profile:
 
 ```bash
-~/.dotfiles/installer/dotlink zsh config
+~/.dotfiles/bin/dotlink link --profile interactive
 ```
 
-Or run the full bootstrap:
+Inspect status without modifying files:
 
 ```bash
-~/.dotfiles/installer/install.sh
+~/.dotfiles/bin/dotlink status --profile base
 ```
 
-Launch the optional Go controller/TUI instead:
+Verify existing links:
 
 ```bash
-~/.dotfiles/installer/install.sh tui
+~/.dotfiles/bin/dotlink verify --profile base
 ```
 
-The `tui` subcommand is opt-in. Running `install.sh` with no arguments remains the shell bootstrap. Details live in [`docs/installer.md`](docs/installer.md); the authority contract lives in [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md).
+There is no local bootstrap command in this repository. A future sibling bootstrapper may install software and runtimes externally; this repository only links dotfiles.
 
 ## Structure
 
@@ -59,21 +59,23 @@ The `tui` subcommand is opt-in. Running `install.sh` with no arguments remains t
 | `git/` | Git configuration linked into `$HOME` |
 | `wsl/` | WSL-specific environment and functions |
 | `linux/` | Native Linux-specific environment and functions |
-| `installer/` | Shell-first installation and linking scripts |
+| `profiles/` | Declarative dotfiles profile manifests |
+| `bin/dotlink` | Visible dotfiles linker entrypoint |
+| `dotlink/` | Dotlink implementation, safety checks, and tests |
 | `docs/` | Project authority docs, operational guides, roadmap, and decisions |
 
 ## Common entry points
 
 | Task | Entry point |
 |------|-------------|
-| Link repo modules into `$HOME` | `~/.dotfiles/installer/dotlink --dry-run bash git` |
-| Run the shell bootstrap | `~/.dotfiles/installer/install.sh` |
-| Inspect bootstrap actions | `~/.dotfiles/installer/install.sh list` |
-| Understand bootstrap authority | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
+| Link repo modules into `$HOME` | `~/.dotfiles/bin/dotlink link --profile base` |
+| Inspect dotfile link state | `~/.dotfiles/bin/dotlink status --profile base` |
+| Remove repo-owned links | `~/.dotfiles/bin/dotlink unlink --profile base` |
+| Understand bootstrap boundary | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
 
 ## Safety notes
 
-- Existing `.bashrc` and `.gitconfig` files should be backed up before linking.
+- Existing `.bashrc` and `.gitconfig` files block linking and must be moved manually before dotlink will manage them.
 - Secrets, tokens, `.env` files, and private keys do not belong in this repository.
-- Run `dotlink --dry-run` before linking on a new machine.
-- For bootstrap authority, read [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md).
+- `bin/dotlink` refuses regular files, foreign symlinks, and broken symlinks it cannot prove are repository-owned.
+- For the bootstrap boundary, read [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md).

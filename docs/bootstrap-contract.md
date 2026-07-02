@@ -1,51 +1,71 @@
-# Bootstrap Contract
+# Dotfiles Bootstrap Boundary
 
-The shell bootstrap is canonical. `installer/install.sh` and `installer/lib/*.sh` own the catalog, planning, apply flow, list output, privilege model, advisory state, and controller handshake. Go and TUI code may make that flow easier to use, but they are optional frontends.
+This repository is canonical only for dotfiles modules, declarative profiles, and symlink lifecycle. Shell-first bootstrap canonicality is superseded here: package installation, runtime installation, Homebrew setup, OS provisioning, and TUI bootstrap flows belong outside this repository.
 
 ## Contract surface
 
 | Surface | Authority |
 |---------|-----------|
-| `installer/install.sh apply` | Default bootstrap execution path. |
-| `installer/install.sh plan` | Deterministic plan computation for selected actions. |
-| `installer/install.sh list` | Catalog and advisory status inspection. |
-| `installer/install.sh controller` | Handshake endpoint for optional Go frontend integration. |
-| `installer/install.sh tui` | Launcher for the optional Go controller/TUI. |
+| `bin/dotlink link` | Create repository-owned symlinks for selected modules or profiles. |
+| `bin/dotlink list` | List modules selected by a profile or explicit arguments. |
+| `bin/dotlink status` | Report missing, linked, drifted, or conflicting paths without modifying files. |
+| `bin/dotlink unlink` | Remove only symlinks proven to be repository-owned. |
+| `bin/dotlink verify` | Fail when selected links are missing, drifted, or conflicting. |
 
-Running `installer/install.sh` without a command defaults to `apply`.
+No local command in this repository installs software or bootstraps an operating system.
 
-## Catalog and planning
+## Removed bootstrap surfaces
 
-The catalog lives in `installer/lib/catalog.sh`. It defines ordered actions, labels, groups, dependencies, and privilege metadata. Current action groups are:
+The following surfaces are intentionally removed or non-authoritative in this repository:
 
-- `system`: distro system packages.
-- `brew`: Homebrew bootstrap and brew-managed developer tools.
-- `dotfiles`: clone, backup, and link steps.
-- `runtime`: Go, nvm, uv, and rustup runtime managers.
+- `installer/install.sh` (removed; no compatibility shim)
+- `installer/dotlink` (removed; no compatibility shim)
+- `cmd/bootstrap-controller/` (removed; non-authoritative)
+- `internal/controller/` (removed; non-authoritative)
+- `bootstrap-controller` (removed; non-authoritative)
+- controller-only Go module and tests
 
-The planner expands dependencies, validates known actions, computes selected work from `--only`, `--skip`, and `--force`, and can emit text or JSON. Saved plans are checked against the current catalog hash and execution context before replay.
+There is no compatibility shim and no preservation guarantee for the removed installer paths. Recover or migrate old bootstrap behavior from git history into a separate sibling bootstrapper if needed.
 
-## Privileges
+## Dotlink safety contract
 
-Privilege is per action. System package installation is the elevated phase; Homebrew tools, dotfile operations, and runtime managers are user-owned by design. If elevation is needed, the shell flow asks for explicit confirmation and runs children with a trusted fixed PATH.
+- Dotlink manages only symlinks it can prove point into this repository.
+- Regular files, directories, foreign symlinks, and unproven broken symlinks are conflicts.
+- `status` and `verify` are read-only drift detectors.
+- `unlink` removes only repository-owned symlinks.
+- `link` rolls back only symlinks created during the failed operation.
+- Profiles are restricted shell-data manifests, not executable provisioning scripts.
 
-## Advisory state
+## External bootstrapper handoff
 
-Bootstrap state is advisory and lives under `${XDG_STATE_HOME:-$HOME/.local/state}/dniebles` unless overridden by bootstrap state environment variables. The state file records catalog hash, execution context, status, selected actions, and completed actions. State and saved plans are signed with a local HMAC secret so stale or tampered replay is rejected.
+The sibling bootstrapper is external and docs-only in this repository. It may eventually own software installation, runtime installation, and machine provisioning. This repository must not implement that sibling bootstrapper beyond the handoff notes in [`bootstrapper-handoff.md`](bootstrapper-handoff.md).
 
-## Optional Go/TUI frontend
+## Recovery / Troubleshooting
 
-The Go controller is a thin adapter:
+When `status` or `verify` reports conflicts, drift, or missing links:
 
-1. It handshakes with `installer/install.sh controller`.
-2. It loads choices through `installer/install.sh list --format json`.
-3. It applies selected actions through `installer/install.sh apply`.
-4. If the handshake or payload is unsupported, it falls back to the shell bootstrap.
+1. **Inspect the state** without modifying files:
+   ```bash
+   bin/dotlink status --profile base
+   ```
+2. **Identify the conflict type** for each reported path:
+   - `conflict` — the path is a regular file, directory, foreign symlink, or broken symlink not owned by the repository.
+   - `drift` — the path is a repository-owned symlink pointing at a different module or commit.
+   - `missing` — the path does not exist.
+3. **Resolve manually** before re-running `link`:
+   - Back up the conflicting file or directory, then remove it.
+   - For a foreign symlink that should not be managed, leave it in place and exclude the module from the profile.
+   - For a drifted owned symlink, remove it and let `link` recreate it.
+4. **Re-run link and verify**:
+   ```bash
+   bin/dotlink link --profile base
+   bin/dotlink verify --profile base
+   ```
 
-The frontend must not invent catalog behavior, privilege rules, or state semantics. If frontend behavior and shell behavior diverge, the shell contract wins.
+If a previous `link` operation was interrupted, run `status` to see whether any partially-created symlinks remain; `unlink` removes only repository-owned symlinks.
 
 ## Related docs
 
-- Use [`installer.md`](installer.md) for commands and troubleshooting.
 - Use [`vision.md`](vision.md) for project boundaries.
-- Use [`decisions/adr-0001-shell-first-canonicality.md`](decisions/adr-0001-shell-first-canonicality.md) for the durable shell-first decision.
+- Use [`bootstrapper-handoff.md`](bootstrapper-handoff.md) for external bootstrapper boundaries.
+- Use [`decisions/adr-0002-dotfiles-bootstrap-split.md`](decisions/adr-0002-dotfiles-bootstrap-split.md) for the durable split decision.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0002: Dotfiles/bootstrap split](adr-0002-dotfiles-bootstrap-split.md)
 
 ## Context
 
@@ -12,11 +12,11 @@ If the frontend were treated as an equal source of truth, documentation and beha
 
 ## Decision
 
-`installer/install.sh` and `installer/lib/*.sh` are the canonical bootstrap implementation. Go/TUI code is an optional frontend that consumes the shell contract and must fall back to shell behavior when the contract is unavailable or incompatible.
+This decision is superseded. `installer/install.sh`, `installer/dotlink`, `cmd/bootstrap-controller/`, and `internal/controller/` are removed or non-authoritative in this repository. Dotfiles authority is limited to configuration modules, declarative profiles, and symlink lifecycle.
 
 ## Consequences
 
-- Bootstrap documentation must describe shell-owned behavior first.
-- README must link to authority docs instead of duplicating the contract.
-- Frontend changes must preserve shell contract compatibility.
-- Any conflict between shell behavior and frontend docs is resolved in favor of the shell behavior.
+- This ADR remains only as historical context for the previous bootstrap authority model.
+- Current documentation must point readers to ADR 0002 and the dotfiles-only boundary.
+- This repository does not preserve local compatibility for the removed installer or controller surfaces.
+- Any future bootstrap canonicality decision belongs in a separate sibling bootstrapper boundary, not in this repository.
