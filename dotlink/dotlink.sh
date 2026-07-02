@@ -23,6 +23,8 @@ Usage:
   bin/dotlink verify MODULE...
 
 --profile and explicit MODULE arguments are mutually exclusive.
+status and verify without arguments scan ALL known modules, not just
+the base profile.
 
 Dotlink manages repository-owned symlinks only. It never installs packages,
 runtimes, tools, or OS bootstrap dependencies.
@@ -456,10 +458,18 @@ main() {
         *) warn "unknown command: $command"; usage; exit 2 ;;
     esac
 
-    local modules_output
-    modules_output="$(resolve_modules "$@")" || exit $?
-    if [ -n "$modules_output" ]; then
-        mapfile -t modules < <(printf '%s\n' "$modules_output")
+    # status/verify without args: scan ALL known modules, not just base profile.
+    if { [ "$command" = "status" ] || [ "$command" = "verify" ]; } && [ $# -eq 0 ]; then
+        local all_known
+        all_known="$(dotlink_list_known_modules "$REPO_ROOT")"
+        [ -n "$all_known" ] || { warn "no known modules found"; exit 1; }
+        mapfile -t modules < <(printf '%s\n' "$all_known")
+    else
+        local modules_output
+        modules_output="$(resolve_modules "$@")" || exit $?
+        if [ -n "$modules_output" ]; then
+            mapfile -t modules < <(printf '%s\n' "$modules_output")
+        fi
     fi
     [ "${#modules[@]}" -gt 0 ] || { warn "no modules selected"; exit 1; }
 

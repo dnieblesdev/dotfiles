@@ -26,6 +26,14 @@ dotlink_is_known_module() {
     return 1
 }
 
+dotlink_list_known_modules() {
+    local repo_root="$1"
+    local known_module
+    for known_module in "${DOTLINK_KNOWN_MODULES[@]}"; do
+        [ -d "$repo_root/$known_module" ] && printf '%s\n' "$known_module"
+    done
+}
+
 dotlink_validate_manifest_line() {
     local line="$1"
 

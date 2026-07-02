@@ -277,4 +277,13 @@ EOF
 chmod +x "$TMP_REPO/scripts/test file.sh"
 (cd "$TMP_REPO" && make check) >"$TMP_ROOT/make-check-spaces.out" 2>"$TMP_ROOT/make-check-spaces.err"
 
+# status without args scans ALL known modules, not just base profile.
+"$TMP_REPO/bin/dotlink" link bash git zsh config > /dev/null 2>&1 || true
+"$TMP_REPO/bin/dotlink" status > "$TMP_ROOT/status-all.out" 2>/dev/null || true
+grep -q 'bash' "$TMP_ROOT/status-all.out" || { printf 'FAIL: status missing bash\n' >&2; exit 1; }
+grep -q 'git' "$TMP_ROOT/status-all.out" || { printf 'FAIL: status missing git\n' >&2; exit 1; }
+grep -q 'zsh' "$TMP_ROOT/status-all.out" || { printf 'FAIL: status missing zsh\n' >&2; exit 1; }
+grep -q 'config' "$TMP_ROOT/status-all.out" || { printf 'FAIL: status missing config\n' >&2; exit 1; }
+"$TMP_REPO/bin/dotlink" unlink bash git zsh config > /dev/null 2>&1 || true
+
 printf 'dotlink tests passed\n'
