@@ -10,4 +10,4 @@ test:
 	@dotlink/tests/run.sh
 
 verify:
-	@scripts/verify-bootstrap-split.sh
+	@scripts/verify-dotfiles-boundary.sh

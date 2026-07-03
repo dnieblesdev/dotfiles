@@ -3,16 +3,16 @@
 ## Exploration: reconstruct-project-source-of-truth
 
 ### Current State
-Superseded by `split-dotfiles-bootstrap-identity`: this repository is now authoritative only for dotfiles configuration modules, declarative profiles, and repository-owned symlink lifecycle behavior. Package installation, runtime setup, OS bootstrap, and controller behavior are external to this repository.
+Superseded by the dotfiles-only boundary decision: this repository is now authoritative only for dotfiles configuration modules, declarative profiles, and repository-owned symlink lifecycle behavior. Package installation, runtime setup, OS provisioning, and controller behavior are external to this repository.
 
 ### Affected Areas
 - `README.md` — points readers toward the dotfiles-only source of truth.
-- `docs/removed-installer.md` — removed from local authority by `split-dotfiles-bootstrap-identity`.
+- `docs/removed-installer.md` — removed from local authority by the dotfiles-only boundary decision.
 - `docs/vision.md` — would define the canonical project intent and boundaries.
-- `docs/bootstrap-contract.md` — removed from local authority by `split-dotfiles-bootstrap-identity`.
+- `docs/dotfiles-contract.md` — defines the current dotfiles contract.
 - `docs/roadmap.md` — would separate near-term cleanup from the authoritative contract.
 - `docs/decisions/` — optional ADRs for durable dotfiles-only repository boundaries.
-- Historical note, superseded by `split-dotfiles-bootstrap-identity`: `installer/install.sh`, `installer/lib/*.sh`, `cmd/bootstrap-controller/main.go`, and `internal/controller/adapter.go` were the bootstrap implementation sources for this archived reconstruction phase and are no longer authoritative in this dotfiles repository.
+- Historical note, superseded by the dotfiles-only boundary decision: `installer/install.sh`, `installer/lib/*.sh`, `cmd/bootstrap-controller/main.go`, and `internal/controller/adapter.go` were the removed installer/controller implementation sources for this archived reconstruction phase and are no longer authoritative in this dotfiles repository.
 
 ### Approaches
 1. **Single monolithic PRD/doc** — Put vision, contract, roadmap, and decisions into one large document.

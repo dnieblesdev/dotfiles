@@ -2,15 +2,14 @@
 
 Personal dotfiles for a modular shell development environment across WSL and native Linux.
 
-This README is an entry map for dotfiles only. This repository owns configuration modules, declarative profiles, and symlink lifecycle; it does not own workstation bootstrap, package installation, runtime installation, or OS provisioning.
+This README is an entry map for dotfiles only. This repository owns configuration modules, declarative profiles, and symlink lifecycle; it does not own package installation, runtime installation, Homebrew setup, or OS provisioning.
 
 ## Start here
 
 | Need | Read |
 |------|------|
 | Project purpose, boundaries, and non-goals | [`docs/vision.md`](docs/vision.md) |
-| Dotfiles/bootstrap authority boundary | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
-| External bootstrapper handoff | [`docs/bootstrapper-handoff.md`](docs/bootstrapper-handoff.md) |
+| Dotfiles contract and safety rules | [`docs/dotfiles-contract.md`](docs/dotfiles-contract.md) |
 | Active and deferred work | [`docs/roadmap.md`](docs/roadmap.md) |
 | Durable architecture decisions | [`docs/decisions/`](docs/decisions/) |
 
@@ -46,7 +45,7 @@ Verify existing links:
 ~/.dotfiles/bin/dotlink verify --profile base
 ```
 
-There is no local bootstrap command in this repository. A future sibling bootstrapper may install software and runtimes externally; this repository only links dotfiles.
+There is no local software-provisioning command in this repository. This repository only links dotfiles.
 
 ## Structure
 
@@ -72,7 +71,7 @@ There is no local bootstrap command in this repository. A future sibling bootstr
 | Inspect dotfile link state | `~/.dotfiles/bin/dotlink status --profile base` |
 | Remove repo-owned links | `~/.dotfiles/bin/dotlink unlink --profile base` |
 | Link explicit modules | `~/.dotfiles/bin/dotlink link bash git` |
-| Understand bootstrap boundary | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
+| Understand the dotfiles contract | [`docs/dotfiles-contract.md`](docs/dotfiles-contract.md) |
 
 `--profile` and explicit module arguments are mutually exclusive.
 
@@ -81,4 +80,4 @@ There is no local bootstrap command in this repository. A future sibling bootstr
 - Existing `.bashrc` and `.gitconfig` files block linking and must be moved manually before dotlink will manage them.
 - Secrets, tokens, `.env` files, and private keys do not belong in this repository.
 - `bin/dotlink` refuses regular files, foreign symlinks, and broken symlinks it cannot prove are repository-owned.
-- For the bootstrap boundary, read [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md).
+- For the dotfiles contract, read [`docs/dotfiles-contract.md`](docs/dotfiles-contract.md).

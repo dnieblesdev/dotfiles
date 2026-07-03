@@ -1,6 +1,6 @@
-# Dotfiles Bootstrap Boundary
+# Dotfiles Contract
 
-This repository is canonical only for dotfiles modules, declarative profiles, and symlink lifecycle. Shell-first bootstrap canonicality is superseded here: package installation, runtime installation, Homebrew setup, OS provisioning, and TUI bootstrap flows belong outside this repository.
+This repository is canonical only for dotfiles modules, declarative profiles, and symlink lifecycle. Package installation, runtime installation, Homebrew setup, OS provisioning, and Go/TUI controller behavior belong outside this repository.
 
 ## Contract surface
 
@@ -12,9 +12,9 @@ This repository is canonical only for dotfiles modules, declarative profiles, an
 | `bin/dotlink unlink` | Remove only symlinks proven to be repository-owned. |
 | `bin/dotlink verify` | Fail when selected links are missing, drifted, or conflicting. |
 
-No local command in this repository installs software or bootstraps an operating system.
+No local command in this repository installs software, configures operating-system dependencies, or provisions a workstation.
 
-## Removed bootstrap surfaces
+## Removed and non-authoritative surfaces
 
 The following surfaces are intentionally removed or non-authoritative in this repository:
 
@@ -25,7 +25,7 @@ The following surfaces are intentionally removed or non-authoritative in this re
 - `bootstrap-controller` (removed; non-authoritative)
 - controller-only Go module and tests
 
-There is no compatibility shim and no preservation guarantee for the removed installer paths. Recover or migrate old bootstrap behavior from git history into a separate sibling bootstrapper if needed.
+There is no compatibility shim and no preservation guarantee for the removed installer paths.
 
 ## Dotlink safety contract
 
@@ -35,10 +35,6 @@ There is no compatibility shim and no preservation guarantee for the removed ins
 - `unlink` removes only repository-owned symlinks.
 - `link` rolls back only symlinks created during the failed operation.
 - Profiles are restricted shell-data manifests, not executable provisioning scripts.
-
-## External bootstrapper handoff
-
-The sibling bootstrapper is external and docs-only in this repository. It may eventually own software installation, runtime installation, and machine provisioning. This repository must not implement that sibling bootstrapper beyond the handoff notes in [`bootstrapper-handoff.md`](bootstrapper-handoff.md).
 
 ## Recovery / Troubleshooting
 
@@ -67,5 +63,4 @@ If a previous `link` operation was interrupted, run `status` to see whether any 
 ## Related docs
 
 - Use [`vision.md`](vision.md) for project boundaries.
-- Use [`bootstrapper-handoff.md`](bootstrapper-handoff.md) for external bootstrapper boundaries.
-- Use [`decisions/adr-0002-dotfiles-bootstrap-split.md`](decisions/adr-0002-dotfiles-bootstrap-split.md) for the durable split decision.
+- Use [`decisions/adr-0002-dotfiles-only-boundary.md`](decisions/adr-0002-dotfiles-only-boundary.md) for the durable ownership decision.

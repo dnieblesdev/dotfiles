@@ -1,13 +1,13 @@
 # Project Source of Truth
 
-These dotfiles provide configuration modules, declarative profiles, and symlink lifecycle for WSL and native Linux. The stable intent is to keep shell configuration, environment paths, Git configuration, and local tooling configuration understandable without turning this repository into a workstation bootstrapper.
+These dotfiles provide configuration modules, declarative profiles, and symlink lifecycle for WSL and native Linux. The stable intent is to keep shell configuration, environment paths, Git configuration, and local tooling configuration understandable without turning this repository into a workstation provisioning system.
 
 ## Authority hierarchy
 
 When docs disagree, use this order:
 
 1. This document defines project purpose, boundaries, non-goals, and authority hierarchy.
-2. `docs/bootstrap-contract.md` explains the local dotfiles boundary and external bootstrapper handoff.
+2. `docs/dotfiles-contract.md` explains the local dotfiles contract and safety rules.
 3. `docs/decisions/` records durable architecture decisions.
 4. `docs/roadmap.md` tracks active or deferred work; it is not stable policy.
 5. `README.md` is an entry map; it is never architecture authority.
@@ -26,16 +26,15 @@ When docs disagree, use this order:
 - Becoming a full OS configuration manager.
 - Installing packages, tools, runtimes, Homebrew, or OS dependencies.
 - Changing the default login shell automatically.
-- Requiring a Go toolchain or TUI to bootstrap a machine.
+- Requiring a Go toolchain or TUI to set up a machine.
 - Making README duplicate the dotlink contract or roadmap.
-- Preserving compatibility for removed local bootstrap entrypoints.
+- Preserving compatibility for removed local installer or controller entrypoints.
 
 ## Navigation
 
 | Need | Read |
 |------|------|
-| Dotfiles/bootstrap boundary | [`bootstrap-contract.md`](bootstrap-contract.md) |
-| External bootstrapper handoff | [`bootstrapper-handoff.md`](bootstrapper-handoff.md) |
+| Dotfiles contract and safety rules | [`dotfiles-contract.md`](dotfiles-contract.md) |
 | Active and deferred work | [`roadmap.md`](roadmap.md) |
 | Durable architecture decisions | [`decisions/`](decisions/) |
 

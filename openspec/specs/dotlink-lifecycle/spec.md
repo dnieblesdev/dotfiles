@@ -72,14 +72,14 @@ The system MUST manage only symlinks that it can prove are repository-owned and 
 - THEN it reports drift or conflict
 - AND it does not repair, remove, or overwrite the path unless the user runs an explicit supported lifecycle operation
 
-### Requirement: Dotlink must not bootstrap software
-The system MUST NOT install applications, tools, runtimes, or perform OS bootstrap during dotlink operations.
+### Requirement: Dotlink must not provision software
+The system MUST NOT install applications, tools, runtimes, or perform OS provisioning during dotlink operations.
 
 #### Scenario: Link workflow stays bounded
 - GIVEN a user runs dotlink for configuration management
 - WHEN dotlink executes
 - THEN only dotfile link lifecycle actions occur
-- AND no package, runtime, or OS bootstrap is started
+- AND no package, runtime, or OS provisioning is started
 
 #### Scenario: Broken legacy installer is not preserved
 - GIVEN a user expects compatibility for `installer/install.sh` or `installer/dotlink`

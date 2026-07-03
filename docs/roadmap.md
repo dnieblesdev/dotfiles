@@ -6,20 +6,18 @@ This roadmap tracks active and deferred work. It is not stable policy; when a de
 
 | Area | Direction | Authority boundary |
 |------|-----------|--------------------|
-| Source-of-truth docs | Keep README short and move stable authority into focused docs. | `docs/vision.md` and `docs/bootstrap-contract.md` win over README summaries. |
+| Repository organization | Move toward a clearer `modules/`-first layout so linkable dotfiles are grouped separately from profiles and the dotlink engine. Treat this as immediate architecture work, not cosmetic cleanup. | `bin/dotlink`, `dotlink/`, `profiles/`, module manifests, tests, and docs must migrate together so symlink behavior remains unchanged. |
+| Source-of-truth docs | Keep README short and move stable authority into focused docs. | `docs/vision.md` and `docs/dotfiles-contract.md` win over README summaries. |
 | Dotlink lifecycle | Keep link, status, verify, and unlink behavior bounded to repo-owned symlinks. | `bin/dotlink` and `dotlink/` own local executable behavior. |
-| Bootstrap split | Keep package, runtime, and OS provisioning outside this repository. | `docs/bootstrapper-handoff.md` defines the external sibling boundary. |
 
 ## Deferred work
 
-- External sibling bootstrapper implementation, if needed.
 - Broader shell test harness if dotlink behavior expands beyond current shell fixtures.
 - Additional ADRs only when a decision is durable enough to outlive roadmap churn.
 
 ## Not roadmap-owned
 
-The roadmap must not redefine bootstrap policy or project boundaries. Link to the authority doc instead:
+The roadmap must not redefine project boundaries. Link to the authority doc instead:
 
-- [`bootstrap-contract.md`](bootstrap-contract.md) for local dotfiles/bootstrap boundary.
+- [`dotfiles-contract.md`](dotfiles-contract.md) for the local dotfiles contract.
 - [`vision.md`](vision.md) for scope and non-goals.
-- [`bootstrapper-handoff.md`](bootstrapper-handoff.md) for the external bootstrapper boundary.

@@ -1,16 +1,16 @@
 # Dotfiles — Agent Operating Guide
 
-This repository owns **dotfiles modules, declarative profiles, and symlink lifecycle only**. It links repo-owned configuration into `$HOME`. It does **not** install packages, runtimes, tools, Homebrew, or OS dependencies — that belongs in an external sibling bootstrapper.
+This repository owns **dotfiles modules, declarative profiles, and symlink lifecycle only**. It links repo-owned configuration into `$HOME`. It does **not** install packages, runtimes, tools, Homebrew, or OS dependencies.
 
-If you are an agent arriving from another repository (e.g. a bootstrapper), this file is your entry point. It tells you what is safe to call and what is intentionally gone.
+If you are an agent arriving from another repository, this file is your entry point. It tells you what is safe to call and what is intentionally gone.
 
 ## What this repository is and is not
 
 | Is (use it) | Is not (do not look for it here) |
 |-------------|----------------------------------|
 | Shell, Git, and XDG config modules | Package / runtime / OS installation |
-| Declarative profile manifests | Workstation bootstrap or provisioning |
-| Symlink lifecycle via `bin/dotlink` | A Go toolchain or TUI bootstrap flow |
+| Declarative profile manifests | Workstation provisioning |
+| Symlink lifecycle via `bin/dotlink` | A Go toolchain or TUI controller flow |
 | Drift detection and verification | Secret / token / `.env` management |
 
 ## Entrypoints (the only executable surface)
@@ -46,9 +46,28 @@ Quality gate (run before trusting changes):
 ```
 make check    # bash -n syntax check across scripts
 make test     # dotlink integration/regression tests
-make verify   # bootstrap-split drift verifier
+make verify   # dotfiles boundary drift verifier
 make all      # check + test + verify
 ```
+
+## CodeGraph warning
+
+Do **not** treat CodeGraph as authoritative for this repository.
+
+This repo is mostly shell fragments, extensionless dotfiles, Markdown, TOML,
+and Git config. CodeGraph v1.1.3 currently reports `No files found to index`
+for this tree and may show a healthy daemon with an empty index:
+
+```
+Files: 0
+Nodes: 0
+Edges: 0
+```
+
+If CodeGraph returns no results here, that is expected tooling coverage, not
+proof that the repository is empty or that symbols do not exist. Prefer direct
+file inspection, `git ls-files`, and the documented quality gates above for
+this repo.
 
 ## Do not use — removed or non-authoritative
 
@@ -63,14 +82,14 @@ These surfaces were intentionally removed. There is **no compatibility shim and 
 | `bootstrap-controller` binary | Removed, non-authoritative |
 | `go.mod` and Go module | Removed |
 
-To recover old bootstrap behavior: pull it from git history into a **separate sibling bootstrapper repository**, never back into this one.
+Old installer and controller behavior was removed from this repository. Do not recreate it here.
 
 ## Authority chain (when documents disagree)
 
 Read in this order. Earlier wins over later.
 
 1. `docs/vision.md` — project purpose, boundaries, non-goals, authority hierarchy
-2. `docs/bootstrap-contract.md` — dotfiles/bootstrap boundary, contract surface, safety rules
+2. `docs/dotfiles-contract.md` — dotfiles contract surface and safety rules
 3. `docs/decisions/` — durable architecture decisions (ADRs)
 4. `docs/roadmap.md` — active/deferred work (not stable policy)
 5. `README.md` — entry map only, never architecture authority
@@ -90,8 +109,7 @@ Read in this order. Earlier wins over later.
 | Need | Read |
 |------|------|
 | Project purpose and boundaries | [`docs/vision.md`](docs/vision.md) |
-| Dotfiles/bootstrap boundary and recovery runbook | [`docs/bootstrap-contract.md`](docs/bootstrap-contract.md) |
-| External bootstrapper handoff | [`docs/bootstrapper-handoff.md`](docs/bootstrapper-handoff.md) |
+| Dotfiles contract and recovery runbook | [`docs/dotfiles-contract.md`](docs/dotfiles-contract.md) |
 | Durable architecture decisions | [`docs/decisions/`](docs/decisions/) |
 | Active and deferred work | [`docs/roadmap.md`](docs/roadmap.md) |
 

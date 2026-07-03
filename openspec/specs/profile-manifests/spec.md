@@ -11,7 +11,7 @@ The system MUST define profiles as declarative manifests that select modules wit
 - THEN it selects the intended modules declaratively
 - AND it does not trigger installation behavior
 
-#### Scenario: Profiles remain non-bootstrap
+#### Scenario: Profiles remain non-provisioning
 - GIVEN a profile references optional configuration modules
 - WHEN the profile is applied
 - THEN it affects only dotfiles selection and linking
@@ -27,7 +27,7 @@ The system MUST treat `.sh` profile manifests as restricted shell-data files, no
 - AND it accepts the declared data without running provisioning behavior
 
 #### Scenario: Commands and functions are rejected
-- GIVEN a profile manifest contains command substitutions, function definitions, aliases, shell control flow, external command invocations, file mutations, package installation, or bootstrap logic
+- GIVEN a profile manifest contains command substitutions, function definitions, aliases, shell control flow, external command invocations, file mutations, package installation, or provisioning logic
 - WHEN the manifest is loaded
 - THEN the loader rejects the manifest as invalid
 - AND none of the rejected commands or functions execute

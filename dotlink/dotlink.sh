@@ -27,7 +27,7 @@ status and verify without arguments scan ALL known modules, not just
 the base profile.
 
 Dotlink manages repository-owned symlinks only. It never installs packages,
-runtimes, tools, or OS bootstrap dependencies.
+runtimes, tools, or OS provisioning dependencies.
 USAGE
 }
 
