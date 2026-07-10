@@ -11,7 +11,7 @@ source "$REPO_ROOT/dotlink/manifest.sh"
 usage() {
     cat <<'USAGE'
 Usage:
-  bin/dotlink link [--profile NAME]
+  bin/dotlink link [--report=json] [--profile NAME]
   bin/dotlink list [--profile NAME]
   bin/dotlink status [--profile NAME]
   bin/dotlink unlink [--profile NAME]
@@ -31,8 +31,155 @@ runtimes, tools, or OS provisioning dependencies.
 USAGE
 }
 
-info() { printf 'dotlink: %s\n' "$1"; }
+REPORT_MODE=""
+REPORT_FAILURE_MODULE=""
+REPORT_FAILURE_SOURCE=""
+REPORT_FAILURE_TARGET=""
+REPORT_FAILURE_CODE=""
+REPORT_FAILURE_MESSAGE=""
+REPORT_HAS_FAILURE=0
+REPORT_ROLLBACK_ATTEMPTED=0
+REPORT_ROLLBACK_COMPLETED=0
+REPORT_ENTRY_MODULES=()
+REPORT_ENTRY_SOURCES=()
+REPORT_ENTRY_TARGETS=()
+REPORT_ENTRY_OUTCOMES=()
+REPORT_ENTRY_CAUSE_CODES=()
+REPORT_ENTRY_CAUSE_MESSAGES=()
+REPORT_REMOVED_TARGETS=()
+REPORT_REMOVED_DIRECTORIES=()
+ENSURED_CREATED_DIRS=()
+
+info() {
+    if [ "$REPORT_MODE" = "json" ]; then
+        printf 'dotlink: %s\n' "$1" >&2
+    else
+        printf 'dotlink: %s\n' "$1"
+    fi
+}
 warn() { printf 'dotlink: %s\n' "$1" >&2; }
+
+report_reset() {
+    REPORT_FAILURE_MODULE=""
+    REPORT_FAILURE_SOURCE=""
+    REPORT_FAILURE_TARGET=""
+    REPORT_FAILURE_CODE=""
+    REPORT_FAILURE_MESSAGE=""
+    REPORT_HAS_FAILURE=0
+    REPORT_ROLLBACK_ATTEMPTED=0
+    REPORT_ROLLBACK_COMPLETED=0
+    REPORT_ENTRY_MODULES=()
+    REPORT_ENTRY_SOURCES=()
+    REPORT_ENTRY_TARGETS=()
+    REPORT_ENTRY_OUTCOMES=()
+    REPORT_ENTRY_CAUSE_CODES=()
+    REPORT_ENTRY_CAUSE_MESSAGES=()
+    REPORT_REMOVED_TARGETS=()
+    REPORT_REMOVED_DIRECTORIES=()
+}
+
+report_add_entry() {
+    REPORT_ENTRY_MODULES+=("$1")
+    REPORT_ENTRY_SOURCES+=("$2")
+    REPORT_ENTRY_TARGETS+=("$3")
+    REPORT_ENTRY_OUTCOMES+=("$4")
+    REPORT_ENTRY_CAUSE_CODES+=("${5:-}")
+    REPORT_ENTRY_CAUSE_MESSAGES+=("${6:-}")
+}
+
+report_set_failure() {
+    REPORT_HAS_FAILURE=1
+    REPORT_FAILURE_MODULE="$1"
+    REPORT_FAILURE_SOURCE="$2"
+    REPORT_FAILURE_TARGET="$3"
+    REPORT_FAILURE_CODE="$4"
+    REPORT_FAILURE_MESSAGE="$5"
+}
+
+json_string() {
+    local value="$1" char escaped="" char_code i
+    for ((i = 0; i < ${#value}; i++)); do
+        char="${value:i:1}"
+        case "$char" in
+            '"') escaped+='\"' ;;
+            '\') escaped+='\\' ;;
+            $'\b') escaped+='\b' ;;
+            $'\f') escaped+='\f' ;;
+            $'\n') escaped+='\n' ;;
+            $'\r') escaped+='\r' ;;
+            $'\t') escaped+='\t' ;;
+            *)
+                printf -v char_code '%d' "'$char"
+                if [ "$char_code" -lt 32 ]; then
+                    printf -v char '\\u%04x' "$char_code"
+                fi
+                escaped+="$char"
+                ;;
+        esac
+    done
+    printf '"%s"' "$escaped"
+}
+
+json_nullable_string() {
+    if [ -n "$1" ]; then
+        json_string "$1"
+    else
+        printf 'null'
+    fi
+}
+
+report_render() {
+    local -a modules=("$@")
+    local i
+
+    printf '{"schema_version":1,"modules":['
+    for ((i = 0; i < ${#modules[@]}; i++)); do
+        [ "$i" -eq 0 ] || printf ','
+        json_string "${modules[$i]}"
+    done
+    printf '],"status":'
+    if [ "$REPORT_HAS_FAILURE" -eq 1 ]; then printf '"failed"'; else printf '"success"'; fi
+    printf ',"entries":['
+    for ((i = 0; i < ${#REPORT_ENTRY_MODULES[@]}; i++)); do
+        [ "$i" -eq 0 ] || printf ','
+        printf '{"module":'; json_string "${REPORT_ENTRY_MODULES[$i]}"
+        printf ',"source":'; json_string "${REPORT_ENTRY_SOURCES[$i]}"
+        printf ',"target":'; json_string "${REPORT_ENTRY_TARGETS[$i]}"
+        printf ',"outcome":'; json_string "${REPORT_ENTRY_OUTCOMES[$i]}"
+        if [ -n "${REPORT_ENTRY_CAUSE_CODES[$i]}" ]; then
+            printf ',"cause":{"code":'; json_string "${REPORT_ENTRY_CAUSE_CODES[$i]}"
+            printf ',"message":'; json_string "${REPORT_ENTRY_CAUSE_MESSAGES[$i]}"
+            printf '}'
+        fi
+        printf '}'
+    done
+    printf '],"failure":'
+    if [ "$REPORT_HAS_FAILURE" -eq 1 ]; then
+        printf '{"module":'; json_nullable_string "$REPORT_FAILURE_MODULE"
+        printf ',"source":'; json_nullable_string "$REPORT_FAILURE_SOURCE"
+        printf ',"target":'; json_nullable_string "$REPORT_FAILURE_TARGET"
+        printf ',"cause":{"code":'; json_string "$REPORT_FAILURE_CODE"
+        printf ',"message":'; json_string "$REPORT_FAILURE_MESSAGE"
+        printf '}}'
+    else
+        printf 'null'
+    fi
+    printf ',"rollback":{"attempted":'
+    if [ "$REPORT_ROLLBACK_ATTEMPTED" -eq 1 ]; then printf 'true'; else printf 'false'; fi
+    printf ',"completed":'
+    if [ "$REPORT_ROLLBACK_COMPLETED" -eq 1 ]; then printf 'true'; else printf 'false'; fi
+    printf ',"removed_targets":['
+    for ((i = 0; i < ${#REPORT_REMOVED_TARGETS[@]}; i++)); do
+        [ "$i" -eq 0 ] || printf ','
+        json_string "${REPORT_REMOVED_TARGETS[$i]}"
+    done
+    printf '],"removed_directories":['
+    for ((i = 0; i < ${#REPORT_REMOVED_DIRECTORIES[@]}; i++)); do
+        [ "$i" -eq 0 ] || printf ','
+        json_string "${REPORT_REMOVED_DIRECTORIES[$i]}"
+    done
+    printf ']}}\n'
+}
 
 real_path() {
     local path="$1"
@@ -237,6 +384,9 @@ resolve_modules() {
         for module in "${explicit[@]}"; do
             if ! dotlink_is_known_module "$REPO_ROOT" "$module"; then
                 warn "unknown module: $module"
+                if [ "$REPORT_MODE" = "json" ]; then
+                    report_set_failure "$module" "" "" "unknown_module" "unknown module: $module"
+                fi
                 return 1
             fi
         done
@@ -250,17 +400,27 @@ resolve_modules() {
 
 ensure_parent_dir() {
     local target="$1"
-    local parent
+    local parent candidate i
+    local -a missing=()
     parent="$(dirname "$target")"
+    ENSURED_CREATED_DIRS=()
 
-    if [ -d "$parent" ] && [ ! -L "$parent" ]; then
-        return 0
-    fi
-    if [ -e "$parent" ] || [ -L "$parent" ]; then
-        warn "conflict: parent is not a real directory: $parent"
-        return 1
-    fi
-    mkdir -p "$parent"
+    candidate="$parent"
+    while [ ! -d "$candidate" ]; do
+        if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+            warn "conflict: parent is not a real directory: $candidate"
+            return 1
+        fi
+        missing+=("$candidate")
+        candidate="$(dirname "$candidate")"
+    done
+    [ ! -L "$candidate" ] || { warn "conflict: parent is not a real directory: $candidate"; return 1; }
+
+    for ((i = ${#missing[@]} - 1; i >= 0; i--)); do
+        mkdir "$candidate/${missing[$i]##*/}" 2>/dev/null || mkdir "${missing[$i]}" || return 1
+        candidate="${missing[$i]}"
+        ENSURED_CREATED_DIRS+=("$candidate")
+    done
 }
 
 entry_state() {
@@ -397,19 +557,44 @@ cmd_unlink() {
 }
 
 rollback_link() {
-    local target dir i
-    local -a sorted_dirs
+    local target dir i complete=1
+    local -a sorted_dirs=()
 
+    REPORT_ROLLBACK_ATTEMPTED=1
     for target in "${created[@]}"; do
-        [ -L "$target" ] && rm "$target"
+        if [ -L "$target" ] && rm "$target"; then
+            REPORT_REMOVED_TARGETS+=("$target")
+            report_mark_rolled_back "$target"
+        else
+            complete=0
+            warn "rollback: unable to remove $target"
+        fi
     done
 
     # Remove created parent directories if empty. Sort so parents precede
     # children, then iterate in reverse to remove children first.
-    mapfile -t sorted_dirs < <(printf '%s\n' "${created_dirs[@]}" | sort)
+    if [ "${#created_dirs[@]}" -gt 0 ]; then
+        mapfile -t sorted_dirs < <(printf '%s\n' "${created_dirs[@]}" | sort -u)
+    fi
     for (( i=${#sorted_dirs[@]}-1; i>=0; i-- )); do
         dir="${sorted_dirs[$i]}"
-        rmdir "$dir" 2>/dev/null || true
+        if rmdir "$dir" 2>/dev/null; then
+            REPORT_REMOVED_DIRECTORIES+=("$dir")
+        else
+            complete=0
+            warn "rollback: unable to remove $dir"
+        fi
+    done
+    REPORT_ROLLBACK_COMPLETED="$complete"
+}
+
+report_mark_rolled_back() {
+    local target="$1" i
+    for ((i = 0; i < ${#REPORT_ENTRY_TARGETS[@]}; i++)); do
+        if [ "${REPORT_ENTRY_TARGETS[$i]}" = "$target" ] && [ "${REPORT_ENTRY_OUTCOMES[$i]}" = "changed" ]; then
+            REPORT_ENTRY_OUTCOMES[$i]="rolled_back"
+            return 0
+        fi
     done
 }
 
@@ -417,29 +602,45 @@ cmd_link() {
     local modules=("$@")
     local created=()
     local created_dirs=()
-    local module src target state entries
+    local module src target state entries failure_message
 
     for module in "${modules[@]}"; do
-        entries="$(collect_module_entries "$module")" || return 1
+        if ! entries="$(collect_module_entries "$module")"; then
+            report_set_failure "$module" "" "" "unknown_module" "unknown module: $module"
+            return 1
+        fi
         while IFS=$'\t' read -r src target; do
             [ -n "$src" ] || continue
             state="$(entry_state "$src" "$target")"
             case "$state" in
-                linked) ;;
+                linked)
+                    report_add_entry "$module" "$src" "$target" "unchanged"
+                    ;;
                 missing)
-                    local parent parent_existed=0
-                    parent="$(dirname "$target")"
-                    [ -d "$parent" ] && parent_existed=1
-                    if ! ensure_parent_dir "$target" || ! ln -s "$src" "$target"; then
+                    if ! ensure_parent_dir "$target"; then
+                        failure_message="unable to create parent directory for $target"
+                        report_add_entry "$module" "$src" "$target" "failed" "parent_conflict" "$failure_message"
+                        report_set_failure "$module" "$src" "$target" "parent_conflict" "$failure_message"
                         rollback_link
                         return 1
                     fi
-                    [ "$parent_existed" -eq 1 ] || created_dirs+=("$parent")
+                    if ! ln -s "$src" "$target"; then
+                        failure_message="unable to link $target to $src"
+                        report_add_entry "$module" "$src" "$target" "failed" "link_error" "$failure_message"
+                        report_set_failure "$module" "$src" "$target" "link_error" "$failure_message"
+                        rollback_link
+                        return 1
+                    fi
+                    created_dirs+=("${ENSURED_CREATED_DIRS[@]}")
                     created+=("$target")
+                    report_add_entry "$module" "$src" "$target" "changed"
                     info "linked $target -> $src"
                     ;;
                 *)
-                    warn "conflict: refusing to replace $target"
+                    failure_message="conflict: refusing to replace $target"
+                    warn "$failure_message"
+                    report_add_entry "$module" "$src" "$target" "failed" "conflict" "$failure_message"
+                    report_set_failure "$module" "$src" "$target" "conflict" "$failure_message"
                     rollback_link
                     return 1
                     ;;
@@ -449,14 +650,35 @@ cmd_link() {
 }
 
 main() {
-    local command="${1:-}"
-    local -a modules=()
+    local command="${1:-}" rc arg profile_requested=0
+    local -a modules=() link_args=()
 
     case "$command" in
         link|list|status|unlink|verify) shift ;;
         --help|-h|"") usage; exit 0 ;;
         *) warn "unknown command: $command"; usage; exit 2 ;;
     esac
+
+    if [ "$command" = "link" ]; then
+        for arg in "$@"; do
+            case "$arg" in
+                --profile|--profile=*)
+                    profile_requested=1
+                    link_args+=("$arg")
+                    ;;
+                --report=json)
+                    REPORT_MODE="json"
+                    report_reset
+                    ;;
+                --report=*)
+                    warn "unsupported report value: ${arg#--report=}"
+                    exit 2
+                    ;;
+                *) link_args+=("$arg") ;;
+            esac
+        done
+        set -- "${link_args[@]}"
+    fi
 
     # status/verify without args: scan ALL known modules, not just base profile.
     if { [ "$command" = "status" ] || [ "$command" = "verify" ]; } && [ $# -eq 0 ]; then
@@ -466,15 +688,48 @@ main() {
         mapfile -t modules < <(printf '%s\n' "$all_known")
     else
         local modules_output
-        modules_output="$(resolve_modules "$@")" || exit $?
+        if modules_output="$(resolve_modules "$@")"; then
+            :
+        else
+            rc=$?
+            if [ "$REPORT_MODE" = "json" ]; then
+                if [ "$profile_requested" -eq 0 ]; then
+                    for arg in "$@"; do
+                        case "$arg" in
+                            --*) ;;
+                            *)
+                                if ! dotlink_is_known_module "$REPO_ROOT" "$arg"; then
+                                    report_set_failure "$arg" "" "" "unknown_module" "unknown module: $arg"
+                                    break
+                                fi
+                                ;;
+                        esac
+                    done
+                fi
+                [ "$REPORT_HAS_FAILURE" -eq 1 ] || report_set_failure "" "" "" "selection_error" "module selection failed"
+                report_render
+            fi
+            exit "$rc"
+        fi
         if [ -n "$modules_output" ]; then
             mapfile -t modules < <(printf '%s\n' "$modules_output")
         fi
     fi
-    [ "${#modules[@]}" -gt 0 ] || { warn "no modules selected"; exit 1; }
+    if [ "${#modules[@]}" -eq 0 ]; then
+        warn "no modules selected"
+        if [ "$REPORT_MODE" = "json" ]; then
+            report_set_failure "" "" "" "selection_error" "no modules selected"
+            report_render
+        fi
+        exit 1
+    fi
 
     case "$command" in
-        link) cmd_link "${modules[@]}" ;;
+        link)
+            if cmd_link "${modules[@]}"; then rc=0; else rc=$?; fi
+            if [ "$REPORT_MODE" = "json" ]; then report_render "${modules[@]}"; fi
+            return "$rc"
+            ;;
         list) cmd_list "${modules[@]}" ;;
         status) cmd_status "${modules[@]}" ;;
         unlink) cmd_unlink "${modules[@]}" ;;

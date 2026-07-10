@@ -49,11 +49,90 @@ grep -q '^linked' "$TMP_ROOT/status.out"
 "$TMP_REPO/bin/dotlink" unlink --profile base
 assert_missing "$DOTLINK_HOME/.bashrc"
 
+# Structured report: ordered results, JSON-only stdout, and shell-sensitive names.
+printf 'quoted fixture\n' > "$TMP_REPO/bash/.quoted\"name"
+"$TMP_REPO/bin/dotlink" link --report=json --profile base >"$TMP_ROOT/report-success.json" 2>"$TMP_ROOT/report-success.err"
+python3 - "$TMP_ROOT/report-success.json" "$TMP_REPO" "$DOTLINK_HOME" <<'PY'
+import json
+import sys
+report = json.load(open(sys.argv[1]))
+repo, home = sys.argv[2:]
+assert report["schema_version"] == 1
+assert report["modules"] == ["bash", "git"]
+assert report["status"] == "success"
+assert report["failure"] is None
+assert report["rollback"] == {"attempted": False, "completed": False, "removed_targets": [], "removed_directories": []}
+assert [entry["outcome"] for entry in report["entries"]] == ["changed"] * len(report["entries"])
+assert [(entry["module"], entry["source"], entry["target"]) for entry in report["entries"]] == [
+    ("bash", f"{repo}/bash/.bashrc", f"{home}/.bashrc"),
+    ("bash", f'{repo}/bash/.quoted"name', f'{home}/.quoted"name'),
+    ("git", f"{repo}/git/.gitconfig", f"{home}/.gitconfig"),
+]
+PY
+grep -q '^dotlink: linked ' "$TMP_ROOT/report-success.err"
+"$TMP_REPO/bin/dotlink" link --report=json --profile base >"$TMP_ROOT/report-noop.json" 2>"$TMP_ROOT/report-noop.err"
+python3 - "$TMP_ROOT/report-noop.json" <<'PY'
+import json
+import sys
+report = json.load(open(sys.argv[1]))
+assert report["status"] == "success"
+assert all(entry["outcome"] == "unchanged" for entry in report["entries"])
+assert report["rollback"]["attempted"] is False
+PY
+"$TMP_REPO/bin/dotlink" unlink --profile base
+rm "$TMP_REPO/bash/.quoted\"name"
+
+# JSON must escape ASCII control bytes in filenames.
+control_filename=$'.control\001name'
+printf 'control fixture\n' > "$TMP_REPO/bash/$control_filename"
+"$TMP_REPO/bin/dotlink" link --report=json bash >"$TMP_ROOT/report-controls.json" 2>"$TMP_ROOT/report-controls.err"
+python3 - "$TMP_ROOT/report-controls.json" "$TMP_REPO" "$DOTLINK_HOME" "$control_filename" <<'PY'
+import json
+import sys
+report = json.load(open(sys.argv[1]))
+repo, home, filename = sys.argv[2:]
+expected_source = f"{repo}/bash/{filename}"
+expected_target = f"{home}/{filename}"
+entry = next(entry for entry in report["entries"] if entry["source"] == expected_source)
+assert entry["target"] == expected_target
+assert "\x01" in entry["source"]
+PY
+"$TMP_REPO/bin/dotlink" unlink bash
+rm "$TMP_REPO/bash/$control_filename"
+
 # Nested config entry link/unlink coverage.
 "$TMP_REPO/bin/dotlink" link config
 assert_link "$DOTLINK_HOME/.config/starship.toml" "$TMP_REPO/config/.config/starship.toml"
 "$TMP_REPO/bin/dotlink" unlink config
 assert_missing "$DOTLINK_HOME/.config/starship.toml"
+
+if "$TMP_REPO/bin/dotlink" link --report=unsupported bash >"$TMP_ROOT/dotlink-bad-report.out" 2>"$TMP_ROOT/dotlink-bad-report.err"; then
+    printf 'expected unsupported report value failure\n' >&2
+    exit 1
+fi
+grep -q 'unsupported report value' "$TMP_ROOT/dotlink-bad-report.err"
+assert_missing "$DOTLINK_HOME/.bashrc"
+if "$TMP_REPO/bin/dotlink" status --report=json >"$TMP_ROOT/dotlink-status-report.out" 2>"$TMP_ROOT/dotlink-status-report.err"; then
+    printf 'expected non-link report option failure\n' >&2
+    exit 1
+fi
+grep -q 'unknown option: --report=json' "$TMP_ROOT/dotlink-status-report.err"
+if "$TMP_REPO/bin/dotlink" link --report=json bash not-a-module >"$TMP_ROOT/dotlink-unknown-report.json" 2>"$TMP_ROOT/dotlink-unknown-report.err"; then
+    printf 'expected unknown reported module failure\n' >&2
+    exit 1
+fi
+python3 - "$TMP_ROOT/dotlink-unknown-report.json" <<'PY'
+import json
+import sys
+report = json.load(open(sys.argv[1]))
+assert report["status"] == "failed"
+assert report["failure"]["module"] == "not-a-module"
+assert report["failure"]["source"] is None
+assert report["failure"]["target"] is None
+assert report["failure"]["cause"]["code"] == "unknown_module"
+assert report["entries"] == []
+PY
+assert_missing "$DOTLINK_HOME/.bashrc"
 
 if "$TMP_REPO/bin/dotlink" link bash not-a-module >"$TMP_ROOT/dotlink-unknown-link.out" 2>"$TMP_ROOT/dotlink-unknown-link.err"; then
     printf 'expected unknown explicit module link failure\n' >&2
@@ -159,10 +238,25 @@ printf 'one\n' > "$ROLLBACK_A"
 printf 'two\n' > "$ROLLBACK_B"
 mkdir -p "$DOTLINK_HOME/.config"
 printf 'local conflict\n' > "$DOTLINK_HOME/.config/dotlink-test-b"
-if "$TMP_REPO/bin/dotlink" link config >"$TMP_ROOT/dotlink-rollback.out" 2>"$TMP_ROOT/dotlink-rollback.err"; then
+if "$TMP_REPO/bin/dotlink" link --report=json config >"$TMP_ROOT/dotlink-rollback.json" 2>"$TMP_ROOT/dotlink-rollback.err"; then
     printf 'expected config rollback conflict\n' >&2
     exit 1
 fi
+python3 - "$TMP_ROOT/dotlink-rollback.json" "$DOTLINK_HOME" <<'PY'
+import json
+import sys
+report = json.load(open(sys.argv[1]))
+home = sys.argv[2]
+assert report["status"] == "failed"
+assert [entry["outcome"] for entry in report["entries"]] == ["rolled_back", "failed"]
+assert report["entries"][1]["cause"]["code"] == "conflict"
+assert report["failure"]["target"] == f"{home}/.config/dotlink-test-b"
+assert report["rollback"]["attempted"] is True
+assert report["rollback"]["completed"] is True
+assert report["rollback"]["removed_targets"] == [f"{home}/.config/dotlink-test-a"]
+PY
+grep -q '^dotlink: linked ' "$TMP_ROOT/dotlink-rollback.err"
+grep -q 'conflict: refusing' "$TMP_ROOT/dotlink-rollback.err"
 assert_missing "$DOTLINK_HOME/.config/dotlink-test-a"
 [ -f "$DOTLINK_HOME/.config/dotlink-test-b" ] || { printf 'rollback conflict file was removed\n' >&2; exit 1; }
 grep -q 'local conflict' "$DOTLINK_HOME/.config/dotlink-test-b"

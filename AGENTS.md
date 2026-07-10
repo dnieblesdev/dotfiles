@@ -2,6 +2,10 @@
 
 This repository owns **dotfiles modules, declarative profiles, and symlink lifecycle only**. It links repo-owned configuration into `$HOME`. It does **not** install packages, runtimes, tools, Homebrew, or OS dependencies.
 
+## Project identity
+
+Use `dotfiles` as the project name for Engram searches, saves, and SDD artifact lookup. The repository directory is named `.dotfiles`, but that is **not** the Engram project identifier.
+
 If you are an agent arriving from another repository, this file is your entry point. It tells you what is safe to call and what is intentionally gone.
 
 ## What this repository is and is not
