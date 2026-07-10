@@ -1,0 +1,43 @@
+project:
+  name: dotfiles
+  root: .
+  summary: Dotfiles modules, declarative profiles, and repository-owned symlink lifecycle via bin/dotlink; provisioning is out of scope.
+
+artifact_store:
+  mode: openspec
+  open_spec_root: openspec
+
+strict_tdd: false
+
+testing:
+  runner: make all
+  focused: make check && make test
+  verification: make verify
+  notes:
+    - Only bin/dotlink is the executable entrypoint.
+    - Keep changes within dotfiles modules, declarative profiles, and symlink lifecycle.
+    - Do not add installer, bootstrap, provisioning, package, runtime, or OS setup behavior.
+
+phase_rules:
+  explore:
+    - Inspect AGENTS.md, authoritative docs, active specs, and Makefile before proposing work.
+    - Do not modify implementation files during exploration.
+  propose:
+    - Preserve the repository boundary: dotfiles configuration and symlink lifecycle only.
+    - Keep future changes aligned with existing active specs and documented non-goals.
+  spec:
+    - Describe observable behavior and acceptance criteria without implementation detail.
+  design:
+    - Preserve bin/dotlink as the only executable surface.
+    - Keep profile manifests declarative and non-provisioning.
+  tasks:
+    - Split future work into reviewable, testable tasks.
+    - Include make check, make test, and make verify where applicable.
+  apply:
+    - Do not modify files outside the approved change scope.
+    - Never introduce installer, bootstrap, provisioning, or dependency-installation behavior.
+  verify:
+    - Run focused checks first, then make all when reasonable.
+    - Confirm repository-boundary and executable-surface constraints.
+  archive:
+    - Preserve active specs and archive completed change artifacts according to OpenSpec conventions.
