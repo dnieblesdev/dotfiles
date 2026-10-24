@@ -18,6 +18,8 @@ mkdir -p "$TMP_REPO"
 (cd "$REPO_ROOT" && tar --exclude='./.git' -cf - .) | (cd "$TMP_REPO" && tar -xf -)
 
 export DOTLINK_HOME="$TMP_ROOT/home"
+export HOME="$DOTLINK_HOME"
+export XDG_CONFIG_HOME="$DOTLINK_HOME/.config"
 mkdir -p "$DOTLINK_HOME"
 export DOTLINK_REPO_ROOT="$TMP_REPO"
 
@@ -459,6 +461,15 @@ rm -f "$TMP_REPO/config/.config/dotlink-test-a" "$TMP_REPO/config/.config/dotlin
 rm -f "$DOTLINK_HOME/.config/dotlink-test-a" "$DOTLINK_HOME/.config/dotlink-test-b"
 "$TMP_REPO/bin/dotlink" unlink git-win > /dev/null 2>&1 || true
 "$TMP_REPO/bin/dotlink" link --profile interactive > /dev/null 2>&1 || true
+# Fish is portable and non-optional, but deliberately not in interactive.
+"$TMP_REPO/bin/dotlink" status fish > "$TMP_ROOT/fish-absent.out"
+grep -qE '^missing[[:space:]]+fish[[:space:]]' "$TMP_ROOT/fish-absent.out"
+if "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/fish-global-missing.out" 2>&1; then
+    printf 'FAIL: global verify must detect missing Fish links\n' >&2
+    exit 1
+fi
+grep -qE '^missing[[:space:]]+fish[[:space:]]' "$TMP_ROOT/fish-global-missing.out"
+"$TMP_REPO/bin/dotlink" link fish > /dev/null
 
 if ! "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/opt-absent-verify.out" 2>&1; then
     printf 'FAIL: verify must pass when an optional module is absent\n' >&2

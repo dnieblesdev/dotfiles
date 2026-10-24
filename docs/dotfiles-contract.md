@@ -42,6 +42,29 @@ There is no compatibility shim and no preservation guarantee for the removed ins
   `git/.gitconfig` stays portable: no machine paths, no absolute interpreter paths,
   and no Windows-only `core` keys.
 
+## Fish: individual snippets
+
+The `fish` module links only regular `*.fish` files directly inside
+`fish/.config/fish/conf.d/` to `$XDG_CONFIG_HOME/fish/conf.d/`.
+An empty or unset `XDG_CONFIG_HOME` falls back to `$DOTLINK_HOME/.config`
+(`$HOME/.config` normally); a relative value is rejected.
+Other modules retain their existing destinations and directory-link behavior.
+
+Select Fish explicitly with `bin/dotlink link fish`; existing profiles do not
+select it. Fish is portable, not platform-optional: global `status` reports
+missing snippets and global `verify` fails until they are linked, like other
+non-optional modules. Existing files and foreign links remain conflicts.
+
+The initial `dotfiles.fish` contains comments only. This module does not manage
+`config.fish`, prompts, distribution settings, universal variables or history,
+and does not activate tools. Neighboring snippets remain untouched. Fish runs
+snippets before `config.fish`; matching snippet names can shadow vendor files.
+Do not reuse vendor names or source distribution configuration here.
+
+Use the same XDG destination for link, status, verify and unlink. The existing
+orphan scan covers `DOTLINK_HOME`, not external XDG trees: removing a source
+snippet outside that tree may leave a broken link requiring manual inspection.
+
 ## Platform layers
 
 The repository separates portable configuration from platform overrides without

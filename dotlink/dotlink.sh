@@ -25,6 +25,9 @@ Usage:
 --profile and explicit MODULE arguments are mutually exclusive.
 status and verify without arguments scan ALL known modules, not just
 the base profile.
+Fish links only individual conf.d/*.fish files under absolute XDG_CONFIG_HOME,
+or DOTLINK_HOME/.config (HOME by default) when XDG_CONFIG_HOME is empty or unset.
+Fish is not selected by existing profiles; absent Fish links fail global verify.
 
 Dotlink manages repository-owned symlinks only. It never installs packages,
 runtimes, tools, or OS provisioning dependencies.
@@ -307,6 +310,20 @@ collect_module_entries() {
         warn "unknown module: $module"
         return 1
     }
+
+    # Fish shares its configuration directory with the user and vendor tooling.
+    # Keep this selection separate: existing modules retain directory-level links.
+    if [ "$module" = fish ]; then
+        target_dir="${XDG_CONFIG_HOME:-$DOTLINK_HOME/.config}"
+        case "$target_dir" in
+            /*) ;;
+            *) warn "XDG_CONFIG_HOME must be an absolute path"; return 1 ;;
+        esac
+        while IFS= read -r -d '' file; do
+            printf '%s\t%s\n' "$file" "$target_dir/fish/conf.d/$(basename "$file")"
+        done < <(find "$src_dir/.config/fish/conf.d" -maxdepth 1 -type f -name '*.fish' -print0 2>/dev/null | sort -z)
+        return 0
+    fi
 
     while IFS= read -r -d '' file; do
         printf '%s\t%s\n' "$file" "$DOTLINK_HOME/$(basename "$file")"
