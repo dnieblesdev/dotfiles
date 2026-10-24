@@ -38,6 +38,22 @@ source ~/.dotfiles/bash/functions
 source ~/.dotfiles/env/paths
 source ~/.dotfiles/env/nvm
 
+# WSL interop: allow xdg-open to detect WSL and launch Windows URL handlers.
+case "$OSTYPE" in
+    linux-gnu*)
+        if grep -qi microsoft /proc/version 2>/dev/null; then
+            path_prepend "/mnt/c/Windows/System32"
+            path_prepend "/mnt/c/Windows"
+        fi
+        ;;
+esac
+
+# Activate after NVM so mise-managed tools and shims keep precedence.
+if command -v mise >/dev/null 2>&1; then
+    path_prepend "$HOME/.local/share/mise/shims"
+    eval "$(mise activate bash)"
+fi
+
 # === 4. Git ===
 
 [ -f ~/.gitconfig ] && true  # git lo lee solo
