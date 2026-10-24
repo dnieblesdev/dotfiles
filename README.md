@@ -55,7 +55,8 @@ There is no local software-provisioning command in this repository. This reposit
 | `zsh/` | Optional interactive Zsh layer: aliases, functions, completions, and tool initialization |
 | `config/` | XDG config files linked under `$HOME`, including Starship |
 | `env/` | Shared environment setup such as PATH, NVM, Rust, Flutter, Java, and Android SDK |
-| `git/` | Git configuration linked into `$HOME` |
+| `git/` | Portable Git configuration linked into `$HOME` |
+| `git-win/` | Windows-only Git overrides, linked as `~/.gitconfig.win` and included by the common config |
 | `wsl/` | WSL-specific environment and functions |
 | `linux/` | Native Linux-specific environment and functions |
 | `profiles/` | Declarative dotfiles profile manifests |
