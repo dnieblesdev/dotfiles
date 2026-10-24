@@ -12,9 +12,10 @@ cleanup() {
 trap cleanup EXIT
 
 # Build a disposable copy of the repository so tests never mutate the source tree.
+# .git is excluded at copy time: review candidate views inside it are written
+# read-only, so copying then deleting it leaves an undeletable tree behind.
 mkdir -p "$TMP_REPO"
-cp -a "$REPO_ROOT"/. "$TMP_REPO"
-rm -rf "$TMP_REPO/.git"
+(cd "$REPO_ROOT" && tar --exclude='./.git' -cf - .) | (cd "$TMP_REPO" && tar -xf -)
 
 export DOTLINK_HOME="$TMP_ROOT/home"
 mkdir -p "$DOTLINK_HOME"
@@ -464,12 +465,11 @@ if ! "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/opt-absent-verify.out" 2>&1; th
     cat "$TMP_ROOT/opt-absent-verify.out" >&2
     exit 1
 fi
-grep -qE '^skip[[:space:]]+git-win[[:space:]]' "$TMP_ROOT/opt-absent-verify.out" || {
-    printf 'FAIL: absent optional module must report skip\n' >&2
-    exit 1
-}
-if grep -qE '^missing[[:space:]]+git-win[[:space:]]' "$TMP_ROOT/opt-absent-verify.out"; then
-    printf 'FAIL: absent optional module reported as missing\n' >&2
+# A successful verify stays silent: an absent optional module must not make an
+# exit-0 verify emit output that callers would read as a problem.
+if [ -s "$TMP_ROOT/opt-absent-verify.out" ]; then
+    printf 'FAIL: verify must stay silent when an optional module is absent\n' >&2
+    cat "$TMP_ROOT/opt-absent-verify.out" >&2
     exit 1
 fi
 

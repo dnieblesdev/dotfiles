@@ -496,8 +496,10 @@ cmd_verify() {
             state="$(entry_state "$src" "$target")"
             if [ "$state" != linked ]; then
                 # An absent optional module is a platform skip, not a failure.
+                # verify stays silent on success: reporting skip here would make
+                # an exit-0 verify emit output that callers read as a problem.
                 if [ "$state" = missing ] && dotlink_is_optional_module "$module"; then
-                    printf '%s\t%s\t%s\n' skip "$module" "$target"
+                    :
                 else
                     rc=1
                     printf '%s\t%s\t%s\n' "$state" "$module" "$target"
