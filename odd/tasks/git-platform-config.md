@@ -57,7 +57,9 @@ Decision (user): remove the `safe.directory` entry.
 
 Evidence: `docs/vision.md:3` declares "WSL and native Linux" as the supported environments.
 Evidence: `~/.gitconfig.windows` is a valid git namespace; `~/.gitconfig.wsl` would be parsed as config for host `wsl`.
-Evidence: `dotlink link <undeclared module>` prints "unknown module" but exits 0 (latent bug, out of scope).
+Evidence: `dotlink link <undeclared module>` prints "unknown module" and exits 1. An earlier
+note claiming exit 0 was a measurement artifact (`$?` was reading `head` in a pipeline).
+Verified with PIPESTATUS and a redirect: exit 1 for link/list/status/verify/unlink.
 Evidence: a `[include]` of an absent file is silently ignored by git 2.53.0 and does not change exit status.
 Evidence: `core.symlinks=false` converts tracked symlinks to regular files on clone under Linux.
 Evidence: `filter.lfs.required` does not change the missing-executable failure; both values abort.
