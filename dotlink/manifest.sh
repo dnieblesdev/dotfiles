@@ -5,7 +5,10 @@ set -euo pipefail
 DOTLINK_PROFILE_NAME=""
 DOTLINK_PROFILE_DESCRIPTION=""
 DOTLINK_PROFILE_MODULES=()
-DOTLINK_KNOWN_MODULES=(bash git zsh config)
+DOTLINK_KNOWN_MODULES=(bash git git-win zsh config)
+# Known modules that only apply to some platforms. `status` and `verify` report them
+# as `skip` when they are absent, so a Linux/WSL host does not fail the all-module scan.
+DOTLINK_OPTIONAL_MODULES=(git-win)
 
 dotlink_manifest_error() {
     printf 'dotlink: %s\n' "$1" >&2
@@ -96,4 +99,13 @@ dotlink_load_profile() {
             return 1
         fi
     done
+}
+
+dotlink_is_optional_module() {
+    local module="$1"
+    local optional
+    for optional in "${DOTLINK_OPTIONAL_MODULES[@]}"; do
+        [ "$module" = "$optional" ] && return 0
+    done
+    return 1
 }

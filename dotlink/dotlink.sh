@@ -461,6 +461,11 @@ cmd_status() {
             [ -n "$src" ] || continue
             seen_targets["$target"]=1
             state="$(entry_state "$src" "$target")"
+            # An optional module that is not present on this platform is skipped,
+            # not reported as missing, so the all-module scan stays platform-safe.
+            if [ "$state" = missing ] && dotlink_is_optional_module "$module"; then
+                state=skip
+            fi
             [ "$state" != conflict ] || rc=1
             printf '%s\t%s\t%s\n' "$state" "$module" "$target"
         done <<< "$entries"
@@ -490,8 +495,15 @@ cmd_verify() {
             seen_targets["$target"]=1
             state="$(entry_state "$src" "$target")"
             if [ "$state" != linked ]; then
-                rc=1
-                printf '%s\t%s\t%s\n' "$state" "$module" "$target"
+                # An absent optional module is a platform skip, not a failure.
+                # verify stays silent on success: reporting skip here would make
+                # an exit-0 verify emit output that callers read as a problem.
+                if [ "$state" = missing ] && dotlink_is_optional_module "$module"; then
+                    :
+                else
+                    rc=1
+                    printf '%s\t%s\t%s\n' "$state" "$module" "$target"
+                fi
             fi
         done <<< "$entries"
     done

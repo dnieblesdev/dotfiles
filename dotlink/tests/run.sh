@@ -12,9 +12,10 @@ cleanup() {
 trap cleanup EXIT
 
 # Build a disposable copy of the repository so tests never mutate the source tree.
+# .git is excluded at copy time: review candidate views inside it are written
+# read-only, so copying then deleting it leaves an undeletable tree behind.
 mkdir -p "$TMP_REPO"
-cp -a "$REPO_ROOT"/. "$TMP_REPO"
-rm -rf "$TMP_REPO/.git"
+(cd "$REPO_ROOT" && tar --exclude='./.git' -cf - .) | (cd "$TMP_REPO" && tar -xf -)
 
 export DOTLINK_HOME="$TMP_ROOT/home"
 mkdir -p "$DOTLINK_HOME"
@@ -379,5 +380,125 @@ grep -q 'git' "$TMP_ROOT/status-all.out" || { printf 'FAIL: status missing git\n
 grep -q 'zsh' "$TMP_ROOT/status-all.out" || { printf 'FAIL: status missing zsh\n' >&2; exit 1; }
 grep -q 'config' "$TMP_ROOT/status-all.out" || { printf 'FAIL: status missing config\n' >&2; exit 1; }
 "$TMP_REPO/bin/dotlink" unlink bash git zsh config > /dev/null 2>&1 || true
+
+# git-win is a known module but no profile may select it.
+"$TMP_REPO/bin/dotlink" link git-win > "$TMP_ROOT/git-win-link.out" 2> "$TMP_ROOT/git-win-link.err" || {
+    printf 'FAIL: git-win link failed\n' >&2
+    cat "$TMP_ROOT/git-win-link.err" >&2
+    exit 1
+}
+assert_link "$DOTLINK_HOME/.gitconfig.win" "$TMP_REPO/git-win/.gitconfig.win"
+
+"$TMP_REPO/bin/dotlink" status --profile base > "$TMP_ROOT/git-win-base.out" 2>/dev/null || true
+if grep -q 'git-win' "$TMP_ROOT/git-win-base.out"; then
+    printf 'FAIL: base profile must not select git-win\n' >&2
+    exit 1
+fi
+
+"$TMP_REPO/bin/dotlink" status > "$TMP_ROOT/git-win-all.out" 2>/dev/null || true
+grep -q 'git-win' "$TMP_ROOT/git-win-all.out" || { printf 'FAIL: status all missing git-win\n' >&2; exit 1; }
+
+"$TMP_REPO/bin/dotlink" unlink git-win > /dev/null 2>&1 || true
+assert_missing "$DOTLINK_HOME/.gitconfig.win"
+
+# Common config carries no machine paths and no absolute interpreter path.
+if grep -q '/mnt/' "$TMP_REPO/git/.gitconfig"; then
+    printf 'FAIL: common gitconfig contains a machine path\n' >&2
+    exit 1
+fi
+if grep -q 'safe' "$TMP_REPO/git/.gitconfig"; then
+    printf 'FAIL: common gitconfig still has a safe section\n' >&2
+    exit 1
+fi
+if grep -q '/usr/bin/gh' "$TMP_REPO/git/.gitconfig"; then
+    printf 'FAIL: common gitconfig hardcodes the gh interpreter path\n' >&2
+    exit 1
+fi
+grep -q 'helper = !gh auth git-credential' "$TMP_REPO/git/.gitconfig" || {
+    printf 'FAIL: common gitconfig must resolve gh through PATH\n' >&2
+    exit 1
+}
+
+# fscache/symlinks moved out of the common layer; autocrlf stays portable.
+grep -q 'autocrlf = input' "$TMP_REPO/git/.gitconfig" || { printf 'FAIL: autocrlf=input missing\n' >&2; exit 1; }
+if grep -qE 'fscache|symlinks' "$TMP_REPO/git/.gitconfig"; then
+    printf 'FAIL: Windows-only core keys remain in the common layer\n' >&2
+    exit 1
+fi
+
+# LFS filters stay global in the common layer.
+for key in 'clean = git-lfs clean' 'smudge = git-lfs smudge' 'process = git-lfs filter-process' 'required = true'; do
+    grep -q "$key" "$TMP_REPO/git/.gitconfig" || { printf 'FAIL: LFS filter missing: %s\n' "$key" >&2; exit 1; }
+done
+
+# Isolated platform selection: include is silent when absent, applied when present.
+GIT_ISO="$TMP_ROOT/git-iso"
+mkdir -p "$GIT_ISO"
+cp "$TMP_REPO/git/.gitconfig" "$GIT_ISO/common"
+
+absent_autocrlf="$(GIT_CONFIG_GLOBAL="$GIT_ISO/common" HOME="$GIT_ISO" git config --get core.autocrlf 2> "$GIT_ISO/absent.err")"
+[ "$absent_autocrlf" = input ] || { printf 'FAIL: absent include changed autocrlf to %s\n' "$absent_autocrlf" >&2; exit 1; }
+[ -s "$GIT_ISO/absent.err" ] && { printf 'FAIL: absent include is not silent\n' >&2; cat "$GIT_ISO/absent.err" >&2; exit 1; }
+GIT_CONFIG_GLOBAL="$GIT_ISO/common" HOME="$GIT_ISO" git config --get user.name > /dev/null 2>&1 || {
+    printf 'FAIL: git unusable without the windows layer\n' >&2
+    exit 1
+}
+
+cp "$TMP_REPO/git-win/.gitconfig.win" "$GIT_ISO/.gitconfig.win"
+present_autocrlf="$(GIT_CONFIG_GLOBAL="$GIT_ISO/common" HOME="$GIT_ISO" git config --get core.autocrlf)"
+[ "$present_autocrlf" = true ] || { printf 'FAIL: windows layer not applied (%s)\n' "$present_autocrlf" >&2; exit 1; }
+GIT_CONFIG_GLOBAL="$GIT_ISO/common" HOME="$GIT_ISO" git config --list --show-origin 2>/dev/null \
+    | grep -q "file:$GIT_ISO/.gitconfig.win" || {
+    printf 'FAIL: show-origin does not attribute the windows layer\n' >&2
+    exit 1
+}
+
+# Optional modules are skipped, never failed, when absent on this platform.
+# Clean fixtures left by earlier cases so the all-module scan starts from a known state.
+rm -f "$TMP_REPO/config/.config/dotlink-test-a" "$TMP_REPO/config/.config/dotlink-test-b"
+rm -f "$DOTLINK_HOME/.config/dotlink-test-a" "$DOTLINK_HOME/.config/dotlink-test-b"
+"$TMP_REPO/bin/dotlink" unlink git-win > /dev/null 2>&1 || true
+"$TMP_REPO/bin/dotlink" link --profile interactive > /dev/null 2>&1 || true
+
+if ! "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/opt-absent-verify.out" 2>&1; then
+    printf 'FAIL: verify must pass when an optional module is absent\n' >&2
+    cat "$TMP_ROOT/opt-absent-verify.out" >&2
+    exit 1
+fi
+# A successful verify stays silent: an absent optional module must not make an
+# exit-0 verify emit output that callers would read as a problem.
+if [ -s "$TMP_ROOT/opt-absent-verify.out" ]; then
+    printf 'FAIL: verify must stay silent when an optional module is absent\n' >&2
+    cat "$TMP_ROOT/opt-absent-verify.out" >&2
+    exit 1
+fi
+
+"$TMP_REPO/bin/dotlink" status > "$TMP_ROOT/opt-absent-status.out" 2>/dev/null || true
+grep -qE '^skip[[:space:]]+git-win[[:space:]]' "$TMP_ROOT/opt-absent-status.out" || {
+    printf 'FAIL: status must report skip for an absent optional module\n' >&2
+    exit 1
+}
+
+# An optional module that IS present is verified like any other module.
+"$TMP_REPO/bin/dotlink" link git-win > /dev/null 2>&1 || true
+if ! "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/opt-linked-verify.out" 2>&1; then
+    printf 'FAIL: verify must pass when the optional module is linked\n' >&2
+    cat "$TMP_ROOT/opt-linked-verify.out" >&2
+    exit 1
+fi
+
+# ... and a broken optional module still fails: skip must not mask real damage.
+rm "$DOTLINK_HOME/.gitconfig.win"
+printf 'local\n' > "$DOTLINK_HOME/.gitconfig.win"
+if "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/opt-conflict-verify.out" 2>&1; then
+    printf 'FAIL: conflicting optional module must fail verify\n' >&2
+    exit 1
+fi
+grep -qE '^conflict[[:space:]]+git-win[[:space:]]' "$TMP_ROOT/opt-conflict-verify.out" || {
+    printf 'FAIL: optional module conflict not reported as conflict\n' >&2
+    exit 1
+}
+rm "$DOTLINK_HOME/.gitconfig.win"
+"$TMP_REPO/bin/dotlink" unlink git-win > /dev/null 2>&1 || true
 
 printf 'dotlink tests passed\n'

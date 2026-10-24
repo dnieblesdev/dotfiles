@@ -30,3 +30,23 @@ source "$HOME/.dotfiles/zsh/completions"
 source "$HOME/.dotfiles/zsh/aliases"
 source "$HOME/.dotfiles/zsh/functions"
 source "$HOME/.dotfiles/zsh/tools"
+
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv zsh)"
+
+# bun completions
+[ -s "/home/dniebles/.bun/_bun" ] && source "/home/dniebles/.bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+# Activate after Homebrew, NVM, and Bun so mise-managed tools and shims keep precedence.
+if command -v mise >/dev/null 2>&1; then
+    path_prepend "$HOME/.local/share/mise/shims"
+    eval "$(mise activate zsh)"
+fi
+
+# Priorizar ejecutables locales de WSL y eliminar entradas duplicadas
+typeset -U path PATH
+path=("$HOME/.local/bin" $path)
+export PATH

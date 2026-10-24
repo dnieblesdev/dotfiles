@@ -33,6 +33,9 @@ Rules you must respect:
 
 - `--profile NAME` and explicit `MODULE...` arguments are **mutually exclusive**. Never combine them.
 - `status` and `verify` with **no arguments** scan ALL known modules, not just `base`.
+- Modules listed in `DOTLINK_OPTIONAL_MODULES` (currently `git-win`) are platform-specific.
+  When an optional module is not linked, `status` reports `skip` and `verify` does not fail;
+  a linked-but-broken optional module still reports `drift` or `conflict` and fails normally.
 - `unlink` removes **only** symlinks it can prove point into this repository. It will not touch foreign files.
 - `link` rolls back only the symlinks created during a failed operation.
 
@@ -42,6 +45,11 @@ Profiles available:
 |---------|---------|---------|
 | `base` | `bash git` | Base shell and Git dotfiles |
 | `interactive` | `bash git zsh config` | Interactive shell and terminal config |
+
+`git-win` is a known module that no profile selects. Link it explicitly only on Windows:
+`bin/dotlink link git-win` creates `~/.gitconfig.win`, which the common `~/.gitconfig`
+includes via `[include]`. When the file is absent the include is silently ignored, so
+WSL and native Linux run on the common values alone.
 
 Note: `env/` is sourced by `.bashrc` and is **not** managed by dotlink (it contains non-hidden files).
 

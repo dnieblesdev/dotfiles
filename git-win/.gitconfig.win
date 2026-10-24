@@ -1,0 +1,6 @@
+# Windows-only Git overrides. Linked by the git-win module as ~/.gitconfig.win.
+# The common ~/.gitconfig includes this file; an absent include is silently ignored.
+[core]
+	autocrlf = true
+	fscache = true
+	symlinks = false
