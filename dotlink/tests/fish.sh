@@ -159,4 +159,38 @@ export XDG_CONFIG_HOME="$TMP/guard/ordinary/./xdg"
 expect 1 '' $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
 export XDG_CONFIG_HOME="$TMP/guard/ordinary/../other"
 expect 1 '' $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
+# zoxide activation is isolated from the user's Fish configuration and binaries.
+FISH_BIN="$(command -v fish)" || { printf 'fish is required for Fish tests\n' >&2; exit 1; }
+mkdir -p "$TMP/zoxide-bin" "$TMP/no-zoxide-bin"
+export ZOXIDE_CALLS="$TMP/zoxide-calls"
+cat > "$TMP/zoxide-bin/zoxide" <<'MOCK'
+#!/bin/sh
+n=0
+[ ! -f "$ZOXIDE_CALLS" ] || read n < "$ZOXIDE_CALLS"
+n=$((n + 1))
+printf '%s\n' "$n" > "$ZOXIDE_CALLS"
+printf 'function __zoxide_z; end\n'
+MOCK
+chmod +x "$TMP/zoxide-bin/zoxide"
+assert_fish() {
+    local expected_out="$1" expected_err="$2" code="$3" actual=0
+    shift 3
+    "$@" >"$TMP/fish-out" 2>"$TMP/fish-err" || actual=$?
+    [ "$actual" = "$code" ]
+    printf '%s' "$expected_out" > "$TMP/fish-expected"
+    cmp "$TMP/fish-expected" "$TMP/fish-out"
+    printf '%s' "$expected_err" > "$TMP/fish-expected"
+    cmp "$TMP/fish-expected" "$TMP/fish-err"
+}
+rm -f "$ZOXIDE_CALLS"
+assert_fish $'initialized\n' '' 0 env PATH="$TMP/zoxide-bin" HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/xdg space" \
+    "$FISH_BIN" -N -c "source '$SRC'; source '$SRC'; functions -q __zoxide_z; and echo initialized"
+[ "$(<"$ZOXIDE_CALLS")" = 1 ]
+rm -f "$ZOXIDE_CALLS"
+assert_fish $'preinitialized\n' '' 0 env PATH="$TMP/zoxide-bin" HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/xdg space" \
+    "$FISH_BIN" -N -c "function __zoxide_z; end; source '$SRC'; echo preinitialized"
+[ ! -e "$ZOXIDE_CALLS" ]
+assert_fish $'absent\n' '' 0 env PATH="$TMP/no-zoxide-bin" HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/xdg space" \
+    "$FISH_BIN" -N -c "source '$SRC'; functions -q __zoxide_z; or echo absent"
+
 printf 'fish tests passed\n'

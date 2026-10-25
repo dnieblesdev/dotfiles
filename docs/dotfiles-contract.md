@@ -59,9 +59,18 @@ select it. Fish is portable, not platform-optional: global `status` reports
 missing snippets and global `verify` fails until they are linked, like other
 non-optional modules. Existing files and foreign links remain conflicts.
 
-The initial `dotfiles.fish` contains comments only. This module does not manage
-`config.fish`, prompts, distribution settings, universal variables or history,
-and does not activate tools. Neighboring snippets remain untouched. Fish runs
+`dotfiles.fish` initializes zoxide with `zoxide init fish | source` only when
+its executable is available and the Fish function `__zoxide_z` is not already
+defined. Without zoxide, the snippet leaves the shell unchanged. Reloading the
+snippet or loading it after an existing zoxide initialization does not initialize
+zoxide again when that function is present.
+
+The duplicate-initialization guard relies on an internal function emitted by
+zoxide 0.10.0, not a stable public API. Recheck it when upgrading zoxide. It does
+not prevent a later snippet or `config.fish` from initializing zoxide again.
+
+This module does not manage `config.fish`, prompts, distribution settings,
+universal variables or history. Neighboring snippets remain untouched. Fish runs
 snippets before `config.fish`; matching snippet names can shadow vendor files.
 Do not reuse vendor names or source distribution configuration here.
 
