@@ -8,6 +8,7 @@ check:
 
 test:
 	@dotlink/tests/run.sh
+	@bash dotlink/tests/fish.sh
 
 verify:
 	@scripts/verify-dotfiles-boundary.sh

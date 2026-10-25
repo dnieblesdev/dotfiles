@@ -25,6 +25,9 @@ Usage:
 --profile and explicit MODULE arguments are mutually exclusive.
 status and verify without arguments scan ALL known modules, not just
 the base profile.
+Fish links only individual conf.d/*.fish files under absolute XDG_CONFIG_HOME,
+or DOTLINK_HOME/.config (HOME by default) when XDG_CONFIG_HOME is empty or unset.
+Fish is not selected by existing profiles; absent Fish links fail global verify.
 
 Dotlink manages repository-owned symlinks only. It never installs packages,
 runtimes, tools, or OS provisioning dependencies.
@@ -308,6 +311,20 @@ collect_module_entries() {
         return 1
     }
 
+    # Fish shares its configuration directory with the user and vendor tooling.
+    # Keep this selection separate: existing modules retain directory-level links.
+    if [ "$module" = fish ]; then
+        target_dir="${XDG_CONFIG_HOME:-$DOTLINK_HOME/.config}"
+        case "$target_dir" in
+            /*) ;;
+            *) warn "XDG_CONFIG_HOME must be an absolute path"; return 1 ;;
+        esac
+        while IFS= read -r -d '' file; do
+            printf '%s\t%s\n' "$file" "$target_dir/fish/conf.d/$(basename "$file")"
+        done < <(find "$src_dir/.config/fish/conf.d" -maxdepth 1 -type f -name '*.fish' -print0 2>/dev/null | sort -z)
+        return 0
+    fi
+
     while IFS= read -r -d '' file; do
         printf '%s\t%s\n' "$file" "$DOTLINK_HOME/$(basename "$file")"
     done < <(find "$src_dir" -maxdepth 1 -name '.*' -type f -print0 2>/dev/null | sort -z)
@@ -396,6 +413,35 @@ resolve_modules() {
 
     dotlink_load_profile "$REPO_ROOT" "$profile" || return 1
     printf '%s\n' "${DOTLINK_PROFILE_MODULES[@]}"
+}
+
+validate_fish_parent_dir() {
+    local target="$1"
+    local path component rest
+    path="$(dirname "$target")"
+
+    rest="${path#/}"
+    component=""
+    while [ -n "$rest" ]; do
+        local segment="${rest%%/*}"
+        if [ "$rest" = "$segment" ]; then rest=""; else rest="${rest#*/}"; fi
+        case "$segment" in
+            "") continue ;;
+            .|..)
+                warn "Fish destination may not contain . or .. components"
+                return 1
+                ;;
+        esac
+        component="$component/$segment"
+        if [ -L "$component" ]; then
+            warn "conflict: parent is not a real directory: $component"
+            return 1
+        fi
+        if [ -e "$component" ] && [ ! -d "$component" ]; then
+            warn "conflict: parent is not a real directory: $component"
+            return 1
+        fi
+    done
 }
 
 ensure_parent_dir() {
@@ -623,6 +669,13 @@ cmd_link() {
         fi
         while IFS=$'\t' read -r src target; do
             [ -n "$src" ] || continue
+            if [ "$module" = fish ] && ! validate_fish_parent_dir "$target"; then
+                failure_message="unable to create parent directory for $target"
+                report_add_entry "$module" "$src" "$target" "failed" "parent_conflict" "$failure_message"
+                report_set_failure "$module" "$src" "$target" "parent_conflict" "$failure_message"
+                rollback_link
+                return 1
+            fi
             state="$(entry_state "$src" "$target")"
             case "$state" in
                 linked)
