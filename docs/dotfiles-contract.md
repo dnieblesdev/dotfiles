@@ -47,8 +47,12 @@ There is no compatibility shim and no preservation guarantee for the removed ins
 The `fish` module links only regular `*.fish` files directly inside
 `fish/.config/fish/conf.d/` to `$XDG_CONFIG_HOME/fish/conf.d/`.
 An empty or unset `XDG_CONFIG_HOME` falls back to `$DOTLINK_HOME/.config`
-(`$HOME/.config` normally); a relative value is rejected.
-Other modules retain their existing destinations and directory-link behavior.
+(`$HOME/.config` normally); a relative value is rejected. Before linking Fish,
+`dotlink` checks every existing component from `/` through `fish/conf.d` and
+rejects symbolic-link ancestors (including broken links) and non-directory
+ancestors without modifying their destinations. `XDG_CONFIG_HOME` paths with
+`.` or `..` components are rejected rather than normalized. Other modules retain
+their existing destinations and directory-link behavior.
 
 Select Fish explicitly with `bin/dotlink link fish`; existing profiles do not
 select it. Fish is portable, not platform-optional: global `status` reports

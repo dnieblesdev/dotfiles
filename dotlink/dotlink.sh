@@ -415,6 +415,35 @@ resolve_modules() {
     printf '%s\n' "${DOTLINK_PROFILE_MODULES[@]}"
 }
 
+validate_fish_parent_dir() {
+    local target="$1"
+    local path component rest
+    path="$(dirname "$target")"
+
+    rest="${path#/}"
+    component=""
+    while [ -n "$rest" ]; do
+        local segment="${rest%%/*}"
+        if [ "$rest" = "$segment" ]; then rest=""; else rest="${rest#*/}"; fi
+        case "$segment" in
+            "") continue ;;
+            .|..)
+                warn "Fish destination may not contain . or .. components"
+                return 1
+                ;;
+        esac
+        component="$component/$segment"
+        if [ -L "$component" ]; then
+            warn "conflict: parent is not a real directory: $component"
+            return 1
+        fi
+        if [ -e "$component" ] && [ ! -d "$component" ]; then
+            warn "conflict: parent is not a real directory: $component"
+            return 1
+        fi
+    done
+}
+
 ensure_parent_dir() {
     local target="$1"
     local parent candidate i
@@ -640,6 +669,13 @@ cmd_link() {
         fi
         while IFS=$'\t' read -r src target; do
             [ -n "$src" ] || continue
+            if [ "$module" = fish ] && ! validate_fish_parent_dir "$target"; then
+                failure_message="unable to create parent directory for $target"
+                report_add_entry "$module" "$src" "$target" "failed" "parent_conflict" "$failure_message"
+                report_set_failure "$module" "$src" "$target" "parent_conflict" "$failure_message"
+                rollback_link
+                return 1
+            fi
             state="$(entry_state "$src" "$target")"
             case "$state" in
                 linked)

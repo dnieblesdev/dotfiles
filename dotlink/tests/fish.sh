@@ -75,4 +75,88 @@ for mode in empty unset; do
 # Relative XDG is invalid, never interpreted relative to the working directory.
 export XDG_CONFIG_HOME=relative
 expect 1 '' $'dotlink: XDG_CONFIG_HOME must be an absolute path\n' "$CLI" link fish
+
+# Fish rejects every symbolic-link component before examining or creating targets.
+# This includes valid and broken links at XDG_CONFIG_HOME and below it.
+for kind in valid broken; do
+    for component in xdg fish conf.d; do
+        rm -rf "$TMP/guard"
+        mkdir -p "$TMP/guard/real/fish/conf.d" "$TMP/guard/outside"
+        if [ "$kind" = valid ]; then
+            link_dest="$TMP/guard/outside"
+        else
+            link_dest="$TMP/guard/does-not-exist"
+        fi
+        case "$component" in
+            xdg)
+                ln -s "$link_dest" "$TMP/guard/alias"
+                export XDG_CONFIG_HOME="$TMP/guard/alias"
+                ;;
+            fish)
+                mkdir -p "$TMP/guard/xdg"
+                ln -s "$link_dest" "$TMP/guard/xdg/fish"
+                export XDG_CONFIG_HOME="$TMP/guard/xdg"
+                ;;
+            conf.d)
+                mkdir -p "$TMP/guard/xdg/fish"
+                ln -s "$link_dest" "$TMP/guard/xdg/fish/conf.d"
+                export XDG_CONFIG_HOME="$TMP/guard/xdg"
+                ;;
+        esac
+        guarded="$XDG_CONFIG_HOME"
+        [ "$component" = xdg ] || guarded="$guarded/fish"
+        [ "$component" != conf.d ] || guarded="$guarded/conf.d"
+        printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$guarded"
+        expect 1 '' "$expected_err" "$CLI" link fish
+        [ ! -e "$TMP/guard/outside/dotfiles.fish" ] && [ ! -L "$TMP/guard/outside/dotfiles.fish" ]
+        [ -L "$guarded" ]
+    done
+done
+
+# A symlink in a higher XDG ancestor is also rejected without touching its destination.
+rm -rf "$TMP/guard"
+mkdir -p "$TMP/guard/real/xdg" "$TMP/guard/outside"
+ln -s "$TMP/guard/real" "$TMP/guard/ancestor"
+export XDG_CONFIG_HOME="$TMP/guard/ancestor/xdg"
+printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$TMP/guard/ancestor"
+expect 1 '' "$expected_err" "$CLI" link fish
+[ ! -e "$TMP/guard/real/xdg/fish" ]
+
+# Existing links are rejected too when reached through a symbolic ancestor.
+rm -rf "$TMP/guard"
+mkdir -p "$TMP/guard/real/xdg/fish/conf.d"
+export XDG_CONFIG_HOME="$TMP/guard/real/xdg"
+TARGET="$XDG_CONFIG_HOME/fish/conf.d/dotfiles.fish"
+expect 0 "dotlink: linked $TARGET -> $SRC"$'\n' '' "$CLI" link fish
+ln -s "$TMP/guard/real/xdg" "$TMP/guard/alias"
+export XDG_CONFIG_HOME="$TMP/guard/alias"
+printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$TMP/guard/alias"
+expect 1 '' "$expected_err" "$CLI" link fish
+[ -L "$TMP/guard/real/xdg/fish/conf.d/dotfiles.fish" ]
+
+# A Fish ancestor failure rolls back earlier links from the same invocation.
+rm -rf "$TMP/guard" "$HOME/.bashrc"
+mkdir -p "$TMP/guard/outside"
+ln -s "$TMP/guard/outside" "$TMP/guard/alias"
+export XDG_CONFIG_HOME="$TMP/guard/alias"
+printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$TMP/guard/alias"
+expect 1 "dotlink: linked $HOME/.bashrc -> $TMP/repo/bash/.bashrc"$'\n' "$expected_err" "$CLI" link bash fish
+[ ! -e "$HOME/.bashrc" ] && [ ! -L "$HOME/.bashrc" ]
+[ ! -e "$TMP/guard/outside/fish" ]
+
+# Ordinary directories remain valid, including creation of missing descendants.
+rm -rf "$TMP/guard"
+mkdir -p "$TMP/guard/ordinary"
+export XDG_CONFIG_HOME="$TMP/guard/ordinary/new/xdg"
+TARGET="$XDG_CONFIG_HOME/fish/conf.d/dotfiles.fish"
+expect 0 "dotlink: linked $TARGET -> $SRC"$'\n' '' "$CLI" link fish
+expect 0 '' '' "$CLI" link fish
+expect 0 '' '' "$CLI" verify fish
+[ -L "$TARGET" ]
+
+# Dot and dot-dot components are ambiguous and are rejected, not normalized.
+export XDG_CONFIG_HOME="$TMP/guard/ordinary/./xdg"
+expect 1 '' $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
+export XDG_CONFIG_HOME="$TMP/guard/ordinary/../other"
+expect 1 '' $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
 printf 'fish tests passed\n'
