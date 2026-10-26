@@ -9,6 +9,8 @@ check:
 test:
 	@dotlink/tests/run.sh
 	@bash dotlink/tests/fish.sh
+	@python3 dotlink/tests/shells.py
+	@python3 dotlink/tests/shells-tools.py
 
 verify:
 	@scripts/verify-dotfiles-boundary.sh

@@ -10,6 +10,7 @@ This README is an entry map for dotfiles only. This repository owns configuratio
 |------|------|
 | Project purpose, boundaries, and non-goals | [`docs/vision.md`](docs/vision.md) |
 | Dotfiles contract and safety rules | [`docs/dotfiles-contract.md`](docs/dotfiles-contract.md) |
+| Bash/Zsh startup guarantees and shell comparison | [`docs/shells.md`](docs/shells.md) |
 | Active and deferred work | [`docs/roadmap.md`](docs/roadmap.md) |
 | Durable architecture decisions | [`docs/decisions/`](docs/decisions/) |
 

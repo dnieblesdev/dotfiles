@@ -1,6 +1,2 @@
-# ──────────────────────────────────────────────
-# Entorno específico de Linux nativo
-# ──────────────────────────────────────────────
-
-# WORKSPACE: ajustá esta ruta cuando montes el disco en Linux
-export WORKSPACE="/mnt/data/Vault/20_Desarrollo/20.10_Activos"
+# Native Linux machine settings are caller-owned.
+# Set WORKSPACE before loading the shell rc to enable dev() and p().

@@ -2,6 +2,8 @@
 # Prompt y terminal
 # ──────────────────────────────────────────────
 
+# Do not replace a prompt selected after the first dotfiles initialization.
+if [ -z "${__DOTFILES_PROMPT_INITIALIZED:-}" ]; then
 # Variable para identificar chroot
 if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
     debian_chroot=$(cat /etc/debian_chroot)
@@ -36,3 +38,6 @@ xterm*|rxvt*)
     PS1="\[\e]0;${debian_chroot:+($debian_chroot)}\u@\h: \w\a\]$PS1"
     ;;
 esac
+
+__DOTFILES_PROMPT_INITIALIZED=1
+fi
