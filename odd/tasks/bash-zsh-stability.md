@@ -12,11 +12,11 @@ S6. "Entrega una matriz comparativa de Bash, Zsh y Fish con las capacidades comp
 S7. "No realices cambios en el HOME real. Trabaja en una rama específica, con commits separados por slices cuando tengan sentido." "No hagas push, PR ni merge todavía." "No declares la misión terminada si quedan criterios de aceptación sin verificar; distingue claramente los slices completos de los bloqueados."
 
 ## Tasks
-T1 | S1,S4,S7 | inline + read-only explorer | done | static inventory in docs/shells.md, real entrypoints preserved; commit: inventory slice
-T2 | S2,S7 | inline (one dependent portability unit) | in_progress | portable paths, relocated checkout, optional dependencies, regression tests; commit: pending
-T3 | S3,S5,S7 | inline (depends on T2 startup order) | pending | real-tool evidence, reload guards and precedence; commit: pending
-T4 | S4,S5 | inline + independent verifier | pending | startup matrix, focused/global checks and reviews; commit: pending
-T5 | S6,S7 | inline | pending | final comparative documentation and residual risks; commit: pending
+T1 | S1,S4,S7 | inline + read-only explorer | done | static inventory in docs/shells.md, real entrypoints preserved; commit: 46e69be
+T2 | S2,S7 | inline (one dependent portability unit) | done | RED 6 failures; GREEN 4 tests, make all, independent PASS; commit: be90051; native review in T4
+T3 | S3,S5,S7 | delegated (runtime context backstop) | done | RED prior activation/NVM completion and executable-only deactivation; GREEN 7 tools tests; commits: 8a5df2a,85719a4
+T4 | S4,S5 | delegated startup tests + independent verifier + native review | done | 8 startup tests, make all PASS; independent correction recheck PASS; both native authorities approved and burned; commits: 8a5df2a,85719a4
+T5 | S6,S7 | delegated docs + inline closure | done | docs/shells.md matrix, links and residual limits checked; commit: 8a5df2a; final commit records closure
 
 ## Log
 L1. Original request (verbatim):
@@ -145,5 +145,10 @@ No hagas push, PR ni merge todavía. Primero entrega la implementación completa
 No declares la misión terminada si quedan criterios de aceptación sin verificar; distingue claramente los slices completos de los bloqueados.
 
 La prioridad no es producir la mayor cantidad de cambios, sino dejar Bash y Zsh más fiables, portables y fáciles de mantener.
+
+L3. T2 committed be90051 (264 authored lines), isolated tests and make all PASS, independent verifier mvowfpz2-3-14pp PASS incl. baseline/candidate comparison. Native portability review review-b0016f0b9e868ec2 approved and acknowledged (authority burned). Local review slices: inventory 46e69be (211 lines), portability be90051 (264), integrations/startup 8a5df2a (464; cohesive code+tests+docs moderately exceeds the advisory 400), bounded native correction 85719a4 (30). PR shape deferred: no publishing requested; never treat the accumulated feature as one native candidate. Runtime context backstop routed T3 and startup/docs to bounded workers. Closure synchronizes the full Engram document mirror; the earlier recovery copy held only locator and task state.
+
+L4. Integration checks: real mise 2026.10.19, zoxide 0.10.0 and Starship; allowlist PATH negative tests. Synthetic NVM executable competes with local-bin node, real path-backend projects A/B assert executable and env A:A/B:B/A:A, single hooks, preserved prompt and user PATH entries. Independent verifier mvox5ofn-7-qgn4 exposed actual prior-activation precedence and wrong __nvm completion guard; one correction batch and limited recheck mvoxkrza-9-5duf PASS. Native four-lens review review-ebc0152e3976f108 + refuter required R3-001 correction; eval of command mise deactivate now handles both function-backed and executable-only paths. Correction 30 diff lines within plan80; native targeted validator approved, exact acknowledgement burned authority on corrected target sha256:c5cb1ae21991d9a51654319aad916148d85e5b810aaa1f963a166b373afea92f.
+L5. Final checks: python3 dotlink/tests/shells.py (8 PASS), shells-tools.py (7 PASS), make all PASS (worker final correction and parent prior full run); diff checks PASS. Tests never install tools or use actual user startup execution. Real .bashrc/.zshrc/.bash_profile bytes compared to initial authorized read and unchanged. Existing dotlink tests and additional Zsh conflict assert exact exit/stdout/stderr and unchanged synthetic user/login files. Base/candidate aliases/env comparisons match outside requested changes. Actual WSL is not available: test wrapper simulates /proc/version detector; real NVM unavailable: synthetic fixture only. Login profiles remain user-owned, explicit-source matrix is not host-distro certification. No architecture/dotlink ownership expansion, no publishing. Residual guard coupling to generated mise/zoxide/NVM/Starship hooks documented; no future tasks automatically opened. Risk: item 3 (shared environment and prompt reload consumers); independent and native reviews completed.
 
 L2. Baseline da4b4c5, clean master; created feat/bash-zsh-stability. Forecast ~700 authored lines across independent reviewable local commit slices, not one PR. No PR decision needed until delivery is requested. Risk: item 3 (shared environment helpers affect both shells). Writer delegation does not fire: portability and integration depend on the same startup chain; work inline. Read-only explorer traced external startup without executing it.
