@@ -12,6 +12,11 @@ esac
 DOTFILES_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.."
 DOTFILES_ROOT="$(cd -- "$DOTFILES_ROOT" && pwd -P)"
 
+# Unwind an existing official activation before repo/NVM PATH mutations.
+if declare -F _mise_hook >/dev/null && command -v mise >/dev/null 2>&1; then
+    mise deactivate
+fi
+
 # === 1. Funciones de detección de SO (van primero) ===
 
 is_wsl() {
@@ -52,9 +57,12 @@ case "$OSTYPE" in
         ;;
 esac
 
-# Activate after NVM so mise-managed tools and shims keep precedence.
+# Initialize optional tools after repository PATH updates so mise retains precedence.
+if command -v zoxide >/dev/null 2>&1 && ! declare -F __zoxide_z >/dev/null; then
+    eval "$(zoxide init bash)"
+fi
+# mise's generated activation removes/replaces its own hooks before installing them.
 if command -v mise >/dev/null 2>&1; then
-    path_prepend "$HOME/.local/share/mise/shims"
     eval "$(mise activate bash)"
 fi
 

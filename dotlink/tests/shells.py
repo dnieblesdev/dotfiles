@@ -64,6 +64,88 @@ class ShellStartup(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         return result.stdout
 
+    def test_startup_context_matrix_and_user_owned_bash_profile(self):
+        # The entrypoint tests suppress automatic startup to avoid host config.
+        # Bash --noprofile also suppresses login profiles; model that boundary
+        # explicitly, then source a disposable user-owned profile when desired.
+        for shell in ("bash", "zsh"):
+            for login in (False, True):
+                for interactive in (False, True):
+                    with self.subTest(shell=shell, login=login, interactive=interactive):
+                        marker = self.base / f"{shell}-{login}-{interactive}.marker"
+                        code = (f'. "$HOME/.{shell}rc"; printf "loaded\\n" > "{marker}"; '
+                                'printf "interactive:%s\\n" "$([[ $- == *i* ]] && echo yes || echo no)"')
+                        out = self.run_shell(shell, code, interactive=interactive, login=login)
+                        self.assertTrue(marker.exists())
+                        self.assertEqual(out, f"interactive:{'yes' if interactive else 'no'}\n")
+
+        profile = self.home / ".bash_profile"
+        profile.write_text('printf "profile\\n" > "$HOME/profile.marker"; source "$HOME/.bashrc"\n')
+        out = self.run_shell("bash", '. "$HOME/.bash_profile"; printf "%s\\n" "${DOTFILES_ROOT-unset}"', login=True)
+        self.assertIn(str(self.repo), out)
+        self.assertTrue((self.home / "profile.marker").exists())
+        profile.unlink()
+        (self.home / "profile.marker").unlink()
+        out = self.run_shell("bash", 'printf "%s\\n" "${DOTFILES_ROOT-unset}"', login=True)
+        self.assertEqual(out, "unset\n")
+        self.assertFalse((self.home / "profile.marker").exists())
+
+    def test_noninteractive_rc_is_inert_and_reload_is_stable(self):
+        for shell in ("bash", "zsh"):
+            with self.subTest(shell=shell):
+                rc = f"$HOME/.{shell}rc"
+                code = (f'before="$PATH"; . "{rc}"; middle="$PATH"; '
+                        f'. "{rc}"; test "$before" = "$PATH" -a "$middle" = "$PATH"; '
+                        'printf "%s|%s|%s\\n" "$PATH" "$(type -t dev 2>/dev/null || echo absent)" '
+                        '"${DOTFILES_ROOT-unset}"')
+                # Noninteractive mode returns before integrations and PATH changes.
+                out = self.run_shell(shell, code, interactive=False)
+                fields = out.rstrip("\n").split("|")
+                self.assertEqual(fields[0], self.env["PATH"])
+                self.assertEqual(fields[1], "absent")
+                self.assertEqual(fields[2], "unset")
+                self.assertFalse(Path(self.env["XDG_CACHE_HOME"]).exists())
+
+    def test_simulated_wsl_detection_preserves_explicit_workspace(self):
+        workspace = str(self.base / "mnt" / "c" / "workspace")
+        grep = self.bin / "grep"
+        grep.unlink()
+        real_grep = shutil.which("grep")
+        grep.write_text(f'''#!/bin/sh
+last=
+for arg do last=$arg; done
+if [ "$last" = /proc/version ]; then
+    case "$*" in *microsoft*) exit 0;; esac
+fi
+exec '{real_grep}' "$@"
+''')
+        grep.chmod(0o755)
+        self.env.update(WORKSPACE=workspace)
+        for shell in ("bash", "zsh"):
+            with self.subTest(shell=shell):
+                out = self.run_shell(shell, f'. "$HOME/.{shell}rc"; printf "%s|%s|%s\\n" "$WORKSPACE" "$(is_wsl && echo wsl || echo other)" "$PATH"')
+                fields = out.rstrip("\n").split("|")
+                self.assertEqual(fields[:2], [workspace, "wsl"])
+                if shell == "bash":
+                    self.assertIn("/mnt/c/Windows/System32", fields[2].split(":"))
+
+    def test_zsh_conflict_is_preserved_by_public_dotlink(self):
+        target = self.home / ".zshrc"
+        target.unlink()
+        target.write_text("user-owned zsh configuration\n")
+        protected = [target]
+        for name in (".bash_profile", ".profile", ".zprofile", ".zshenv"):
+            fixture = self.home / name
+            fixture.write_text(f"# user-owned {name}\n")
+            protected.append(fixture)
+        before = {path: path.read_bytes() for path in protected}
+        env = dict(self.env, DOTLINK_HOME=str(self.home), PATH=os.environ["PATH"])
+        result = subprocess.run([str(ROOT / "bin/dotlink"), "link", "zsh"], env=env,
+                                cwd=ROOT, capture_output=True, text=True, timeout=15)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (1, "", f"dotlink: conflict: refusing to replace {target}\n"))
+        self.assertEqual({path: path.read_bytes() for path in protected}, before)
+
     def test_relocated_checkout_without_optional_tools(self):
         for shell in ("bash", "zsh"):
             with self.subTest(shell=shell):

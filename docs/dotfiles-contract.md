@@ -137,5 +137,6 @@ If a previous `link` operation was interrupted, run `status` to see whether any 
 
 ## Related docs
 
+- Use [`shells.md`](shells.md) for Bash/Zsh startup ownership, isolated verification, and the Bash/Zsh/Fish comparison.
 - Use [`vision.md`](vision.md) for project boundaries.
 - Use [`decisions/adr-0002-dotfiles-only-boundary.md`](decisions/adr-0002-dotfiles-only-boundary.md) for the durable ownership decision.

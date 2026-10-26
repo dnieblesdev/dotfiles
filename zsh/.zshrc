@@ -11,6 +11,11 @@ esac
 # :A resolves symlinks, including a dotlink entrypoint in another HOME.
 DOTFILES_ROOT="${${(%):-%x}:A:h:h}"
 
+# Unwind an existing official activation before repo/NVM PATH mutations.
+if (( $+functions[_mise_hook] )) && command -v mise >/dev/null 2>&1; then
+    mise deactivate
+fi
+
 is_wsl() {
     grep -qi microsoft /proc/version 2>/dev/null
 }
@@ -32,6 +37,11 @@ fi
 source "$DOTFILES_ROOT/zsh/completions"
 source "$DOTFILES_ROOT/zsh/aliases"
 source "$DOTFILES_ROOT/zsh/functions"
+# Keep all repository PATH edits ahead of mise activation.
+typeset -U path PATH
+path=("$HOME/.local/bin" $path)
+export PATH
+
 source "$DOTFILES_ROOT/zsh/tools"
 
 # Use an available installation; never assume or install Linuxbrew.
@@ -46,13 +56,7 @@ fi
 export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
 [ ! -d "$BUN_INSTALL/bin" ] || path_prepend "$BUN_INSTALL/bin"
 
-# Activate after Homebrew, NVM, and Bun so mise-managed tools and shims keep precedence.
+# mise activation is repeatable: its generated code replaces its own hooks.
 if command -v mise >/dev/null 2>&1; then
-    path_prepend "$HOME/.local/share/mise/shims"
     eval "$(mise activate zsh)"
 fi
-
-# Priorizar ejecutables locales de WSL y eliminar entradas duplicadas
-typeset -U path PATH
-path=("$HOME/.local/bin" $path)
-export PATH
