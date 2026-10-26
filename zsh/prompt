@@ -1,0 +1,28 @@
+# Select exactly one optional Zsh prompt backend on the first repository load.
+if (( ! $+functions[_dotfiles_zsh_prompt_selected] )); then
+    _dotfiles_zsh_prompt_selected() { :; }
+    local prompt_choice=${DOTFILES_ZSH_PROMPT:-starship}
+    case $prompt_choice in
+        starship)
+            # A pre-existing Powerlevel10k must remain the active backend.
+            if (( ! $+functions[p10k] && ! $+functions[p10k_prompt] &&
+                  ! $+functions[prompt_powerlevel10k_setup] && ! $+functions[prompt_powerlevel10k_precmd] )) &&
+                command -v starship >/dev/null 2>&1 &&
+                (( ! $+functions[prompt_starship_precmd] )); then
+                eval "$(starship init zsh)"
+            fi
+            ;;
+        powerlevel10k)
+            if [[ -n ${POWERLEVEL10K_ZSH_THEME_FILE:-} && -r $POWERLEVEL10K_ZSH_THEME_FILE ]] &&
+                (( ! $+functions[prompt_starship_precmd] && ! $+functions[p10k] &&
+                   ! $+functions[prompt_powerlevel10k_setup] && ! $+functions[prompt_powerlevel10k_precmd] )); then
+                # Powerlevel10k's supported switch is session-local; never run its wizard.
+                export POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
+                source "$POWERLEVEL10K_ZSH_THEME_FILE"
+                (( $+functions[prompt_powerlevel9k_setup] )) && prompt_powerlevel9k_setup
+            fi
+            ;;
+        none) ;;
+        *) ;;
+    esac
+fi
