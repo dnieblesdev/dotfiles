@@ -1,29 +1,22 @@
-# ──────────────────────────────────────────────
-# PATH y variables de entorno de herramientas
-# ──────────────────────────────────────────────
+# Shared optional environment for Bash and Zsh.
+# Machine-specific roots must be supplied by the caller, not committed here.
+. "${DOTFILES_ROOT:-$HOME/.dotfiles}/env/path.sh"
 
-# Helpers shared by Bash and Zsh.
-[ -f "$HOME/.dotfiles/env/path.sh" ] && . "$HOME/.dotfiles/env/path.sh"
+[ ! -f "$HOME/.cargo/env" ] || . "$HOME/.cargo/env"
+. "${DOTFILES_ROOT:-$HOME/.dotfiles}/env/go"
 
-# Rust / Cargo
-[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-
-# Go
-[ -f "$HOME/.dotfiles/env/go" ] && . "$HOME/.dotfiles/env/go"
-
-# Java / Android SDK
-export JAVA_HOME="/home/dniebles/development/jdk"
-export ANDROID_HOME="/home/dniebles/Android/Sdk"
-export ANDROID_SDK_ROOT="$ANDROID_HOME"
-path_prepend "$ANDROID_HOME/platform-tools"
-path_prepend "$ANDROID_HOME/cmdline-tools/latest/bin"
-path_prepend "$JAVA_HOME/bin"
-
-# Flutter
-path_prepend "/home/dniebles/development/flutter/bin"
-
-# opencode
-path_prepend "/home/dniebles/.opencode/bin"
-
-# gentle-ai
-path_append "/home/dniebles/.local/bin"
+if [ -n "${JAVA_HOME:-}" ] && [ -d "$JAVA_HOME/bin" ]; then
+    path_prepend "$JAVA_HOME/bin"
+fi
+# Accept either Android spelling without replacing a caller's explicit value.
+if [ -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]; then
+    export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+    export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+    [ ! -d "$ANDROID_HOME/platform-tools" ] || path_prepend "$ANDROID_HOME/platform-tools"
+    [ ! -d "$ANDROID_HOME/cmdline-tools/latest/bin" ] || path_prepend "$ANDROID_HOME/cmdline-tools/latest/bin"
+fi
+if [ -n "${FLUTTER_HOME:-}" ] && [ -d "$FLUTTER_HOME/bin" ]; then
+    path_prepend "$FLUTTER_HOME/bin"
+fi
+[ ! -d "$HOME/.opencode/bin" ] || path_prepend "$HOME/.opencode/bin"
+path_append "$HOME/.local/bin"

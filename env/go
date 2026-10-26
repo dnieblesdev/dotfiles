@@ -6,7 +6,7 @@
 # If another Go is already on PATH, leave it alone.
 
 # Helpers shared by Bash and Zsh.
-[ -f "$HOME/.dotfiles/env/path.sh" ] && . "$HOME/.dotfiles/env/path.sh"
+. "${DOTFILES_ROOT:-$HOME/.dotfiles}/env/path.sh"
 
 if ! command -v go >/dev/null 2>&1 && [ -x "$HOME/.local/go/bin/go" ]; then
     export GOROOT="$HOME/.local/go"

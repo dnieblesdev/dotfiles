@@ -8,6 +8,10 @@ case $- in
       *) return;;
 esac
 
+# Resolve the linked entrypoint, not the checkout's installation directory.
+DOTFILES_ROOT="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.."
+DOTFILES_ROOT="$(cd -- "$DOTFILES_ROOT" && pwd -P)"
+
 # === 1. Funciones de detección de SO (van primero) ===
 
 is_wsl() {
@@ -27,16 +31,16 @@ is_windows() {
 
 # === 2. Config genérica del shell ===
 
-source ~/.dotfiles/bash/config
-source ~/.dotfiles/bash/prompt
-source ~/.dotfiles/bash/aliases
-source ~/.dotfiles/bash/completions
-source ~/.dotfiles/bash/functions
+source "$DOTFILES_ROOT/bash/config"
+source "$DOTFILES_ROOT/bash/prompt"
+source "$DOTFILES_ROOT/bash/aliases"
+source "$DOTFILES_ROOT/bash/completions"
+source "$DOTFILES_ROOT/bash/functions"
 
 # === 3. Variables de entorno ===
 
-source ~/.dotfiles/env/paths
-source ~/.dotfiles/env/nvm
+source "$DOTFILES_ROOT/env/paths"
+source "$DOTFILES_ROOT/env/nvm"
 
 # WSL interop: allow xdg-open to detect WSL and launch Windows URL handlers.
 case "$OSTYPE" in
@@ -61,9 +65,9 @@ fi
 # === 5. Por SO ===
 
 if is_wsl; then
-    source ~/.dotfiles/wsl/env
-    source ~/.dotfiles/wsl/functions
+    source "$DOTFILES_ROOT/wsl/env"
+    source "$DOTFILES_ROOT/wsl/functions"
 elif is_linux; then
-    source ~/.dotfiles/linux/env
-    source ~/.dotfiles/linux/functions
+    source "$DOTFILES_ROOT/linux/env"
+    source "$DOTFILES_ROOT/linux/functions"
 fi

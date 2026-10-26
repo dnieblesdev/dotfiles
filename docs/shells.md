@@ -46,6 +46,26 @@ links. The `config` module may separately provide Starship configuration; linkin
 `zsh` alone does not link it. Repository Zsh deliberately does not source CachyOS
 or Oh My Zsh.
 
+## Portable environment
+
+The entrypoints resolve their symlink targets, so the checkout need not be named
+`~/.dotfiles` (Bash uses GNU `readlink -f`, available on target Linux/WSL).
+`DOTFILES_ROOT` identifies that checkout for shared fragments. Direct standalone
+use of `env/paths` or `env/go` may supply `DOTFILES_ROOT`; their legacy fallback
+remains `~/.dotfiles`.
+
+Machine settings are opt-in: export `WORKSPACE`, `JAVA_HOME`, `FLUTTER_HOME`,
+`ANDROID_HOME` or `ANDROID_SDK_ROOT` before loading the rc. Tool directories are
+added only if present. Neither Linux nor WSL assigns a personal mount path.
+Cargo and NVM remain optional user-owned integrations. Zsh discovers Homebrew
+only on PATH and respects `BUN_INSTALL` (default `~/.bun`) for Bun completion and
+its optional bin directory. No software is installed. Standard Linux utilities
+and shell completion libraries remain system dependencies; aliases such as
+`alert` require their tool (`notify-send`) only when invoked.
+
+Run `python3 dotlink/tests/shells.py` for isolated startup regressions; Python 3,
+Bash and Zsh are test dependencies, not shell startup dependencies.
+
 ## Session boundaries
 
 | Session | Bash | Zsh |

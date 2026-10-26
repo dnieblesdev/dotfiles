@@ -8,6 +8,9 @@ case $- in
       *) return ;;
 esac
 
+# :A resolves symlinks, including a dotlink entrypoint in another HOME.
+DOTFILES_ROOT="${${(%):-%x}:A:h:h}"
+
 is_wsl() {
     grep -qi microsoft /proc/version 2>/dev/null
 }
@@ -17,28 +20,31 @@ is_linux() {
 }
 
 # Shared environment stays shell-agnostic where possible.
-[ -f "$HOME/.dotfiles/env/paths" ] && source "$HOME/.dotfiles/env/paths"
-[ -f "$HOME/.dotfiles/env/nvm" ] && source "$HOME/.dotfiles/env/nvm"
+source "$DOTFILES_ROOT/env/paths"
+source "$DOTFILES_ROOT/env/nvm"
 
-if is_wsl && [ -f "$HOME/.dotfiles/wsl/env" ]; then
-    source "$HOME/.dotfiles/wsl/env"
-elif is_linux && [ -f "$HOME/.dotfiles/linux/env" ]; then
-    source "$HOME/.dotfiles/linux/env"
+if is_wsl; then
+    source "$DOTFILES_ROOT/wsl/env"
+elif is_linux; then
+    source "$DOTFILES_ROOT/linux/env"
 fi
 
-source "$HOME/.dotfiles/zsh/completions"
-source "$HOME/.dotfiles/zsh/aliases"
-source "$HOME/.dotfiles/zsh/functions"
-source "$HOME/.dotfiles/zsh/tools"
+source "$DOTFILES_ROOT/zsh/completions"
+source "$DOTFILES_ROOT/zsh/aliases"
+source "$DOTFILES_ROOT/zsh/functions"
+source "$DOTFILES_ROOT/zsh/tools"
 
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv zsh)"
+# Use an available installation; never assume or install Linuxbrew.
+if command -v brew >/dev/null 2>&1; then
+    eval "$(brew shellenv zsh)"
+fi
 
 # bun completions
-[ -s "/home/dniebles/.bun/_bun" ] && source "/home/dniebles/.bun/_bun"
+[ -s "${BUN_INSTALL:-$HOME/.bun}/_bun" ] && source "${BUN_INSTALL:-$HOME/.bun}/_bun"
 
 # bun
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
+export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+[ ! -d "$BUN_INSTALL/bin" ] || path_prepend "$BUN_INSTALL/bin"
 
 # Activate after Homebrew, NVM, and Bun so mise-managed tools and shims keep precedence.
 if command -v mise >/dev/null 2>&1; then
