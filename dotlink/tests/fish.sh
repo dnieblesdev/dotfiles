@@ -193,4 +193,5 @@ assert_fish $'preinitialized\n' '' 0 env PATH="$TMP/zoxide-bin" HOME="$TMP/home"
 assert_fish $'absent\n' '' 0 env PATH="$TMP/no-zoxide-bin" HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/xdg space" \
     "$FISH_BIN" -N -c "source '$SRC'; functions -q __zoxide_z; or echo absent"
 
+bash "$ROOT/dotlink/tests/fish-mise.sh"
 printf 'fish tests passed\n'

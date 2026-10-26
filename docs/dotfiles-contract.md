@@ -69,10 +69,29 @@ The duplicate-initialization guard relies on an internal function emitted by
 zoxide 0.10.0, not a stable public API. Recheck it when upgrading zoxide. It does
 not prevent a later snippet or `config.fish` from initializing zoxide again.
 
-This module does not manage `config.fish`, prompts, distribution settings,
-universal variables or history. Neighboring snippets remain untouched. Fish runs
-snippets before `config.fish`; matching snippet names can shadow vendor files.
-Do not reuse vendor names or source distribution configuration here.
+This module does not manage `config.fish`, distribution settings, universal
+variables or history. In interactive shells, it schedules one named `fish_prompt`
+callback that removes itself and runs the official `mise activate fish` once.
+This deliberately runs official activation at the first prompt even if another
+startup file activated mise earlier, so later startup PATH edits are corrected.
+Immediately before that activation it sets `MISE_ACTIVATE_AGGRESSIVE=true` in
+this interactive session only, allowing mise's documented aggressive activation
+to restore tool PATH priority when mise updates the environment. This may override
+an inherited false value in this session; it does not modify global or Fish
+configuration. It does not trust an inherited `MISE_SHELL` marker; without a
+`mise` executable, it silently removes the callback without activation.
+Noninteractive shells are unchanged. Mise's official activation hooks handle
+subsequent directory changes and project-specific tool versions; priority is
+restored when mise updates the environment, not continuously against arbitrary
+later PATH edits. Neighboring
+snippets remain untouched. Fish runs snippets before `config.fish`; matching
+snippet names can shadow vendor files. Do not reuse vendor names or source
+distribution configuration here.
+
+The first-prompt activation cannot protect commands executed earlier by
+`config.fish`, nor can it guarantee PATH priority against arbitrary later PATH
+edits until mise next updates the environment. It does not configure global
+aggressive activation.
 
 Use the same XDG destination for link, status, verify and unlink. The existing
 orphan scan covers `DOTLINK_HOME`, not external XDG trees: removing a source
