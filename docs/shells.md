@@ -87,8 +87,40 @@ its optional bin directory. No software is installed. Standard Linux utilities
 and shell completion libraries remain system dependencies; aliases such as
 `alert` require their tool (`notify-send`) only when invoked.
 
-Run `python3 dotlink/tests/shells.py` for isolated startup regressions; Python 3,
-Bash and Zsh are test dependencies, not shell startup dependencies.
+### Zsh history and editing
+
+Interactive repository Zsh keeps a valid caller-provided `HISTFILE`, including
+existing records; explicitly setting it to `/dev/null` remains a disk-history
+opt-out. An unset, empty, or unusable destination (including a directory) falls
+back to `$HOME/.zsh_history` when that path is usable, otherwise `/dev/null`; no
+missing parent directories are created and invalid destinations are not
+replaced. The initial `HISTSIZE` and `SAVEHIST` are 10,000. Caller limits are
+never reduced for file destinations. The `/dev/null` opt-out disables disk
+saving with `SAVEHIST=0`. When an existing file leaves fewer than 10,000 spare records under
+`SAVEHIST`, both limits are raised to at least its observed record count plus
+10,000 entries of headroom. History uses native `INC_APPEND_HISTORY` (not the
+mutually exclusive timed variant) without
+`SHARE_HISTORY`, so commands append incrementally but are not automatically
+exchanged live across concurrent shells. Adjacent duplicates are ignored,
+while older non-adjacent matches are retained; inherited options that prune all
+duplicates or delete duplicates on save/expiry are disabled. History is still
+bounded by the active `HISTSIZE`/`SAVEHIST` limits; a session that exceeds its
+configured in-memory capacity can eventually lose older entries. Space-prefixed
+commands are not promised to be secret or excluded.
+
+The first repository rc load selects native ZLE Emacs mode and binds Up/Down in
+the Emacs keymap to `history-beginning-search-backward` and
+`history-beginning-search-forward`. These built-in ZLE widgets search history by
+the current line prefix and preserve ordinary editing when no match exists. The
+initialization guard deliberately does not reapply bindings on rc reload, so
+user changes made after the first load survive. A keymap chosen by user config
+before the first load is replaced by the documented Emacs initial default;
+non-Emacs maps and bindings installed after that load are not changed. No
+substring-search plugin is installed.
+
+Run `python3 dotlink/tests/shells.py` for isolated startup regressions and
+`python3 dotlink/tests/zsh-native.py` for native history and ZLE regressions;
+Python 3, Bash and Zsh are test dependencies, not shell startup dependencies.
 
 ## Startup contract and verification limits
 

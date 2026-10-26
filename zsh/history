@@ -1,0 +1,47 @@
+# Native Zsh history policy. This module is loaded only by the interactive rc.
+
+# Keep a caller-selected history file when it is a usable file destination.
+# A missing file is usable only when its existing parent is writable; never
+# create directories or replace a directory/foreign object as a fallback.
+_dotfiles_history_destination_ok() {
+    local candidate=$1 parent=${1:h}
+    if [[ -e $candidate || -L $candidate ]]; then
+        [[ -f $candidate && -w $candidate ]]
+    else
+        [[ -d $parent && -w $parent ]]
+    fi
+}
+
+if [[ $HISTFILE != /dev/null ]]; then
+    if [[ -z ${HISTFILE-} ]] || ! _dotfiles_history_destination_ok "$HISTFILE"; then
+        local fallback="$HOME/.zsh_history"
+        if _dotfiles_history_destination_ok "$fallback"; then
+            HISTFILE=$fallback
+        else
+            HISTFILE=/dev/null
+        fi
+    fi
+fi
+unset -f _dotfiles_history_destination_ok
+
+# Use at least 10,000 records, retaining caller limits and reserving at least
+# 10,000 entries beyond the existing file when the current limit is too small.
+(( HISTSIZE < 10000 )) && HISTSIZE=10000
+(( SAVEHIST < 10000 )) && SAVEHIST=10000
+if [[ -f $HISTFILE && $HISTFILE != /dev/null ]]; then
+    _dotfiles_existing_history_records=$(wc -l < "$HISTFILE" 2>/dev/null) || _dotfiles_existing_history_records=0
+    if (( _dotfiles_existing_history_records + 10000 > SAVEHIST )); then
+        SAVEHIST=$(( _dotfiles_existing_history_records + 10000 ))
+    fi
+    unset _dotfiles_existing_history_records
+fi
+(( HISTSIZE < SAVEHIST )) && HISTSIZE=$SAVEHIST
+
+setopt HIST_IGNORE_DUPS
+unsetopt SHARE_HISTORY INC_APPEND_HISTORY_TIME HIST_IGNORE_ALL_DUPS HIST_SAVE_NO_DUPS HIST_EXPIRE_DUPS_FIRST
+if [[ $HISTFILE == /dev/null ]]; then
+    SAVEHIST=0
+    unsetopt INC_APPEND_HISTORY APPEND_HISTORY
+else
+    setopt INC_APPEND_HISTORY
+fi
