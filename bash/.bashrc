@@ -14,7 +14,7 @@ DOTFILES_ROOT="$(cd -- "$DOTFILES_ROOT" && pwd -P)"
 
 # Unwind an existing official activation before repo/NVM PATH mutations.
 if declare -F _mise_hook >/dev/null && command -v mise >/dev/null 2>&1; then
-    mise deactivate
+    eval "$(command mise deactivate)"
 fi
 
 # === 1. Funciones de detección de SO (van primero) ===

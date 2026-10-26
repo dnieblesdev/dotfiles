@@ -62,11 +62,12 @@ only when its function is not already present, so re-sourcing the rc does not
 re-run NVM initialization. The completion guard checks NVM's generated `__nvm`
 function; this implementation detail is tested with a synthetic fixture.
 
-When an existing mise hook is present, the rc calls the official `mise deactivate`
-function before repository PATH changes, then activates again afterward. Hook
-presence, not an inherited `MISE_SHELL` marker alone, proves prior activation.
-Deactivation must run in the current shell; command substitution would isolate
-its effects. The official activation snippet removes/replaces its own mise hooks
+When an existing mise hook is present, the rc runs `eval "$(command mise
+deactivate)"` before repository PATH changes, then activates again afterward.
+This supported CLI form captures the executable's shell code and evaluates it
+in the current shell; `command` bypasses any mise shell function so the code is
+not merely printed. Hook presence, not an inherited `MISE_SHELL` marker alone,
+proves prior activation. The official activation snippet removes/replaces its own mise hooks
 before registering them, so activation calls can repeat without duplicating those
 hooks. All repository
 PATH changes, including Zsh's local bin and Bun, precede mise activation; mise

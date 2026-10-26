@@ -223,6 +223,21 @@ class ToolStartup(unittest.TestCase):
                 expected = "prior:FOREIGN:A\nA:A:A:1:1\nB:B:B:1:2\nA:A:A:1:3\nhooks:1:1:3:nvm:local:nvm-path\n"
                 self.assert_run(shell, code, expected)
 
+    def test_executable_only_deactivation_is_evaluated_in_current_shell(self):
+        self.require_tools("mise", "zoxide")
+        for shell in ("bash", "zsh"):
+            with self.subTest(shell=shell):
+                rc = str(self.repo / ("bash/.bashrc" if shell == "bash" else "zsh/.zshrc"))
+                nvm_init = f"source '{self.repo / 'env/nvm'}'; "
+                remove_mise_function = "unset -f mise; " if shell == "bash" else "unfunction mise; "
+                code = (f"cd '{self.proj_a}'; {nvm_init}eval \"$(mise activate {shell})\"; "
+                        f"{remove_mise_function}PATH='{self.local_bin}:{self.nvm_bin}:'\"$PATH\"; export PATH; "
+                        f"source '{rc}'; source '{rc}'; "
+                        "printf 'result:%s:%s:%s:%s\\n' \"$(command node)\" \"$DIAG_PROJECT\" "
+                        "\"$(declare -F nvm >/dev/null 2>&1 || typeset -f nvm >/dev/null; echo available)\" "
+                        f"\"$(case \":$PATH:\" in *\":{self.local_bin}:\"*) echo local;; *) echo missing;; esac)\"")
+                self.assert_run(shell, code, "result:A:A:available:local\n")
+
     def test_synthetic_nvm_reload_does_not_win_over_project_mise(self):
         self.require_tools("mise")
         for shell in ("bash", "zsh"):

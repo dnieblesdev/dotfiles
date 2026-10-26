@@ -13,7 +13,7 @@ DOTFILES_ROOT="${${(%):-%x}:A:h:h}"
 
 # Unwind an existing official activation before repo/NVM PATH mutations.
 if (( $+functions[_mise_hook] )) && command -v mise >/dev/null 2>&1; then
-    mise deactivate
+    eval "$(command mise deactivate)"
 fi
 
 is_wsl() {
