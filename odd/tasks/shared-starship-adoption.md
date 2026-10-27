@@ -1,6 +1,6 @@
 # Shared Starship and live Zsh adoption
 Use Starship in Bash and Zsh with minimal environment-compatible changes; Fish stays unchanged.
-Branch: `feat/shared-starship-adoption`. Local work-unit commits only; no publication authorized. Checks: focused shell tests, `make all`, live login/non-login sessions. Forecast: 180–300 authored lines; strategy: ask-on-risk.
+Branch: `feat/shared-starship-adoption`. Publication authorized: push, PR to master and policy-compliant merge; preserve original commits and do not repeat local adoption. Checks: focused shell tests, `make all`, live login/non-login sessions. Forecast: 180–300 authored lines; strategy: ask-on-risk.
 
 ## Specs
 S1. "si, adoptemos starship en ambas hay que dar el siguiente paso y dejar todo bien."
@@ -8,10 +8,21 @@ S2. "ya sabes cambios minimos por ahora. y el scoope es pensado en que pueda fun
 S3. "fish ya lo dejamos con lo que trae CachyOS por ahora, no me quiero meter con eso."
 S4. "vamos a terminar la adopcion de zsh y con eso cerrariamos la fase de shells creo yo."
 
+S5. "Verifica el diff completo contra master, conserva los commits a8da518 y bf3d79e y confirma que el alcance sea exclusivamente el soporte de Starship compartido y sus pruebas/documentación relacionadas."
+S6. "Ejecuta las verificaciones finales pertinentes y comprueba que las revisiones nativas reconocidas siguen correspondiendo a los cambios publicados."
+S7. "Si no aparecen bloqueos, publica la rama, crea la PR contra master y realiza el merge respetando las políticas del repositorio."
+S8. "No repitas la adopción local ni modifiques .bashrc, .zshrc, .bash_profile, Fish o las configuraciones reales. No instales herramientas."
+S9. "Después, sincroniza master, verifica el árbol limpio y confirma que los enlaces de dotlink siguen apuntando correctamente."
+S10. "Entrega commits, PR, merge, pruebas y estado final. Mantén documentados los límites de WSL y NVM reales."
+
 ## Tasks
 T1 | S1–S3 | delegated (context backstop): minimal Bash Starship integration, isolated RED/GREEN and environment/reload regression tests, concise docs | done | commit: a8da5185ec85ba534d7b97c25d6803a96cc9e0fb; RED/GREEN, tool tests 8, Zsh integrations 5 and make all PASS
 T2 | S1–S3 | parent: assessment and applicable checks; commit coherent source unit | done | commit: a8da5185ec85ba534d7b97c25d6803a96cc9e0fb; native approved and acknowledged review-fb7cdaac9835c327
 T3 | S1–S4 | parent adoption + delegated operational PTY checks (context backstop): private backups, shared config link and reversible live Zsh adoption; preserve Fish/default shell and profile | done | source commit: a8da5185ec85ba534d7b97c25d6803a96cc9e0fb; live evidence L6–L7
+
+T4 | S5–S6,S8,S10 | delegated read-only audit (context backstop) + parent final isolated make all and read-only link verification | done | preserved a8da518/bf3d79e; make all and read-only links PASS; native consumed target matched
+T5 | S7–S8,S10 | parent: push feature, PR against master using Refs #12 and type:feature, policy/check gate then merge without bypass | in_progress | approved issue #12 remains closed
+T6 | S8–S10 | parent: fast-forward master, prove preserved commits/reviewed source, clean tree and read-only link targets; save delivery evidence | pending | no live shell startup or re-adoption
 
 ## Log
 L1. User request: "si, adoptemos starship en ambas hay que dar el siguiente paso y dejar todo bien. ya sabes cambios minimos por ahora. y el scoope es pensado en que pueda funciona tanto en un ambiente general como si ya vienen scripts del entorno como nos paso con cachyOS."
@@ -24,3 +35,25 @@ L6. Live transaction PASS: ~/.zshrc -> repo/zsh/.zshrc; ~/.config/starship.toml 
 L7. Live PTY checks PASS: Bash and Zsh interactive login/non-login all exit0; Starship hook once initially/after rc reload; _mise_hook and __zoxide_z present; mise current/zoxide --version exit0; no P10k functions in Zsh. Same visible shared-config rendering in all four sessions. History=/dev/null; temporary Starship cache and zoxide data removed. Initial parent harness incorrectly rejected normal Bash exit trailer despite passing runtime assertions; corrected harness permits only known exit/logout trailers and normalizes ANSI/nonprinting shell wrappers, no unexpected startup diagnostics. Profile hash and default shell /bin/fish unchanged; backup0700/links verified. Only source unit reviewed natively; live adoption operationally tested, not a second native candidate. Source diff remains identical to a8da518; no publication authorized or performed.
 L8. Rollback reference (not executed): backup at `/home/dniebles/.local/state/dotfiles-adoption/starship-adoption.5engl11q`. Inspect current targets first. Remove `~/.config/starship.toml` only if it is still the exact symlink to this repo's `config/.config/starship.toml`; preserve any replacement. Run `bin/dotlink unlink zsh` only for the proven-owned repo link. Restore retained `.zshrc.original` only when `~/.zshrc` is absent; keep verified `.zshrc` copy/manifest in backup. Do not overwrite unexpected targets or alter Fish, `.bash_profile`, default shell, history or packages. Bash prompt source rollback is a separate reviewed repository change, not removal of the existing Bash adoption.
 L9. Completion: 79 authored lines in source work unit including tracking; final tracking-only update is structurally checked separately. No source edits after native approval; no separate verifier added by ASSESS plan (native high was shell_process signal in tests, no named Task Size high-risk item). ShellCheck unavailable and actual WSL/real NVM remain unverified from prior phase. Optional Zsh plugins stay opt-in; installed distro plugins are not silently sourced. This adoption intentionally stops sourcing the CachyOS rc wrapper rather than layering its prompt with Starship. Risk: none (requested prompt behavior and validated, reversible target adoption; no unrelated shared-contract change).
+
+L10. Publication authorization (verbatim):
+
+La adopción local de Starship compartido entre Bash y Zsh está aprobada.
+
+Procede a cerrar la fase de publicación de la rama feat/shared-starship-adoption.
+
+Verifica el diff completo contra master, conserva los commits a8da518 y bf3d79e y confirma que el alcance sea exclusivamente el soporte de Starship compartido y sus pruebas/documentación relacionadas.
+
+Ejecuta las verificaciones finales pertinentes y comprueba que las revisiones nativas reconocidas siguen correspondiendo a los cambios publicados.
+
+Si no aparecen bloqueos, publica la rama, crea la PR contra master y realiza el merge respetando las políticas del repositorio.
+
+No repitas la adopción local ni modifiques .bashrc, .zshrc, .bash_profile, Fish o las configuraciones reales. No instales herramientas.
+
+Después, sincroniza master, verifica el árbol limpio y confirma que los enlaces de dotlink siguen apuntando correctamente.
+
+Entrega commits, PR, merge, pruebas y estado final. Mantén documentados los límites de WSL y NVM reales.
+
+L11. Human selected: "Refs #12, sin reabrirla (recomendado)". Use nonclosing Refs #12; existing CLOSED issue has status:approved, no relabel/reopen. Target github.com/dnieblesdev/dotfiles, verified master5dc78be, ADMIN current gh session; explicit publication authorization now supersedes earlier local-only notes. Origin is unambiguous. Initial full diff: only bash/prompt (8 additions), related shell tools tests/docs and this feature record; 85 authored lines before publication metadata. Original reviewed source commit tree8431cc15cb68b0cdbc18ffb556ece48887a8cbaf, base treef030b6558b3926ea9b583222c0e8fb7363e02b7c match retained native authority evidence. No aggregate re-review requested or needed for passive follow-up metadata. ShellCheck remains unavailable; actual WSL and real NVM not tested.
+
+L12. Final publication checks PASS: make all exit0 (syntax, dotlink integration/Fish regressions, startup8, Zsh native8, integrations5, tools8, boundary verification); git diff checks PASS. Read-only dotlink status/verify bash zsh and exact Bash/Zsh/shared Starship symlink targets PASS; .bash_profile hash unchanged. No real shell startup/adoption repeated. Audit found stored native terminal-consumption record matching review-fb7cdaac9835c327 and exact target; consumed revision remains retained host acknowledgement evidence, not a field in that record. Original commits and their trees/ancestors verified; source/tests/docs equal approved a8da518. Remaining publication metadata is passive MD only. No required workflow/template files in target tree; remote master currently unprotected. Merge will still use normal policy gate/head pin, no admin bypass.
