@@ -1,0 +1,43 @@
+# Optional Zsh integrations. Explicit paths are authoritative: invalid paths skip.
+local data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+local auto_explicit=${ZSH_AUTOSUGGEST_SCRIPT+x}
+local syntax_explicit=${ZSH_SYNTAX_HIGHLIGHTING_SCRIPT+x}
+local fzf_explicit=${FZF_ZSH_SCRIPT+x}
+local auto_script=${ZSH_AUTOSUGGEST_SCRIPT-}
+local syntax_script=${ZSH_SYNTAX_HIGHLIGHTING_SCRIPT-}
+local fzf_script=${FZF_ZSH_SCRIPT-}
+
+if [[ -z $auto_explicit ]]; then
+    for auto_script in "$data_home/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" "$HOME/.local/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"; do
+        [[ -r $auto_script ]] && break
+    done
+fi
+if [[ -z $syntax_explicit ]]; then
+    for syntax_script in "$data_home/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" "$HOME/.local/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"; do
+        [[ -r $syntax_script ]] && break
+    done
+fi
+
+if (( ! $+functions[_dotfiles_autosuggestions_loaded] && ! $+functions[_zsh_autosuggest_start] )) && [[ -r $auto_script ]]; then
+    source "$auto_script"
+    _dotfiles_autosuggestions_loaded() { :; }
+fi
+
+if (( ! $+functions[_dotfiles_fzf_loaded] )); then
+    if [[ -n $fzf_explicit ]]; then
+        [[ -r $fzf_script ]] && source "$fzf_script" && _dotfiles_fzf_loaded() { :; }
+    elif [[ -o zle && -t 0 && -t 1 ]] && command -v fzf >/dev/null 2>&1; then
+        local fzf_version=$(fzf --version 2>/dev/null)
+        if [[ $fzf_version =~ '^([0-9]+)\.([0-9]+)' ]] &&
+            (( 10#${match[1]} > 0 || 10#${match[2]} >= 48 )); then
+            eval "$(fzf --zsh 2>/dev/null)"
+            _dotfiles_fzf_loaded() { :; }
+        fi
+    fi
+fi
+
+# Syntax highlighting wraps widgets, and therefore must be loaded last.
+if (( ! $+functions[_dotfiles_syntax_highlighting_loaded] && ! $+functions[_zsh_highlight] )) && [[ -r $syntax_script ]]; then
+    source "$syntax_script"
+    _dotfiles_syntax_highlighting_loaded() { :; }
+fi

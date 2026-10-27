@@ -34,6 +34,8 @@ elif is_linux; then
     source "$DOTFILES_ROOT/linux/env"
 fi
 
+source "$DOTFILES_ROOT/zsh/history"
+source "$DOTFILES_ROOT/zsh/keybindings"
 source "$DOTFILES_ROOT/zsh/completions"
 source "$DOTFILES_ROOT/zsh/aliases"
 source "$DOTFILES_ROOT/zsh/functions"
@@ -60,3 +62,7 @@ export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
 if command -v mise >/dev/null 2>&1; then
     eval "$(mise activate zsh)"
 fi
+
+# Initialize prompt and widget-mutating tools before syntax highlighting.
+source "$DOTFILES_ROOT/zsh/prompt"
+source "$DOTFILES_ROOT/zsh/plugins"
