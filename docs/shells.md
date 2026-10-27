@@ -76,8 +76,11 @@ aggressive activation. Bash and Zsh guard zoxide initialization by checking for
 the generated `__zoxide_z` function. That name is an implementation detail of
 zoxide 0.10.0, not a stable public API; recheck the guard when upgrading. Zsh
 also avoids reinitializing Starship when its generated prompt hook is present.
-Reloading preserves existing prompt hooks; Bash retains a prompt selected after
-its first dotfiles initialization. mise, zoxide, and Starship remain optional.
+Bash and Zsh initialize optional Starship only when its executable is available.
+Bash keeps its native PS1 when Starship is absent; both shells recognize
+Starship's generated prompt hook and avoid duplicate initialization. Reloading
+preserves existing prompt hooks; Bash retains a prompt selected after its first
+dotfiles initialization. mise, zoxide, and Starship remain optional.
 Real NVM was not available for verification; a synthetic fixture verifies its
 reload behavior and PATH interaction.
 

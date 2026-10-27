@@ -4,6 +4,13 @@
 
 # Do not replace a prompt selected after the first dotfiles initialization.
 if [ -z "${__DOTFILES_PROMPT_INITIALIZED:-}" ]; then
+# Respect a Starship initialization performed by an earlier startup fragment.
+if declare -F starship_precmd >/dev/null 2>&1 ||
+    [[ ${PROMPT_COMMAND:-} == *starship_precmd* ]]; then
+    :
+elif command -v starship >/dev/null 2>&1; then
+    eval "$(starship init bash)"
+else
 # Variable para identificar chroot
 if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
     debian_chroot=$(cat /etc/debian_chroot)
@@ -39,5 +46,6 @@ xterm*|rxvt*)
     ;;
 esac
 
+fi
 __DOTFILES_PROMPT_INITIALIZED=1
 fi

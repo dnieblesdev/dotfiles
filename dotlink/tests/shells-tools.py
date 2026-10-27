@@ -147,6 +147,50 @@ class ToolStartup(unittest.TestCase):
                 expected = "first:A:A\nbefore:1:1\nreload:B:B\ncounts:1:1\nafter:B:B\nback:A:A\nzoxide:learned\n"
                 self.assert_run(shell, code, expected)
 
+    def test_bash_optional_starship_initializes_once_and_preserves_hooks(self):
+        fake_dir = self.base / "fake-bin"
+        fake_dir.mkdir()
+        fake = fake_dir / "starship"
+        calls = self.base / "starship-calls"
+        fake.write_text(
+            "#!/bin/sh\n"
+            f"printf 'init\\n' >> '{calls}'\n"
+            "cat <<'SH'\n"
+            "starship_precmd() { :; }\n"
+            "if [[ -z \"${PROMPT_COMMAND-}\" ]]; then PROMPT_COMMAND=starship_precmd; "
+            "elif [[ \"$PROMPT_COMMAND\" != *starship_precmd* ]]; then "
+            "STARSHIP_PROMPT_COMMAND=\"$PROMPT_COMMAND\"; PROMPT_COMMAND=starship_precmd; fi\n"
+            "PS1='starship> '\n"
+            "SH\n")
+        fake.chmod(0o755)
+        rc = str(self.repo / "bash/.bashrc")
+        code = ("prior_count=0; prior_prompt() { prior_count=$((prior_count+1)); }; "
+                "PROMPT_COMMAND=prior_prompt; "
+                f"source '{rc}'; source '{rc}'; "
+                "eval \"$PROMPT_COMMAND\"; "
+                "printf 'state:%s:%s:%s:%s\\n' \"$PS1\" \"$prior_count\" "
+                "\"$(declare -p PROMPT_COMMAND | grep -o 'starship_precmd' | wc -l)\" "
+                "\"$(declare -p STARSHIP_PROMPT_COMMAND | grep -o 'prior_prompt' | wc -l)\"")
+        self.assert_run("bash", code, "state:starship> :0:1:1\n",
+                        path=f"{fake_dir}:{self.bin}:/usr/bin:/bin")
+        self.assertEqual(calls.read_text(), "init\n")
+
+        preinitialized = ("starship_precmd() { :; }; "
+                          "PROMPT_COMMAND='unrelated_prompt'; PS1='before> '; "
+                          f"source '{rc}'; "
+                          "printf 'preserved:%s:%s:%s\\n' "
+                          "\"$(declare -F starship_precmd >/dev/null && echo starship)\" "
+                          "\"$(case $PROMPT_COMMAND in *unrelated_prompt*) echo hooks;; *) echo missing;; esac)\" "
+                          "\"$PS1\"")
+        status, stdout, stderr = self.run_shell("bash", preinitialized,
+                                                path=f"{fake_dir}:{self.bin}:/usr/bin:/bin")
+        self.assertEqual((status, stdout, stderr),
+                         (0, "preserved:starship:hooks:before> \n", ""))
+        self.assertEqual(calls.read_text(), "init\n")
+
+        absent = f"source '{rc}'; case $PS1 in *'\\u@\\h:'*) printf 'fallback\\n';; *) printf 'missing\\n';; esac"
+        self.assert_run("bash", absent, "fallback\n", path=str(self.no_tools))
+
     def test_prior_activation_marker_prompt_and_real_starship_hooks(self):
         self.require_tools("mise", "zoxide", "starship")
         for shell in ("bash", "zsh"):
