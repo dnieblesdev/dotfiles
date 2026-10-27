@@ -34,6 +34,8 @@ elif is_linux; then
     source "$DOTFILES_ROOT/linux/env"
 fi
 
+source "$DOTFILES_ROOT/zsh/history"
+source "$DOTFILES_ROOT/zsh/keybindings"
 source "$DOTFILES_ROOT/zsh/completions"
 source "$DOTFILES_ROOT/zsh/aliases"
 source "$DOTFILES_ROOT/zsh/functions"

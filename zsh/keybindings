@@ -1,0 +1,9 @@
+# Native ZLE policy: establish Emacs and prefix-history arrows once, on the
+# first interactive repository rc load. Later rc reloads leave user/widget
+# rebindings intact. Bindings are limited to the Emacs keymap.
+if [[ -z ${_DOTFILES_ZSH_KEYBINDINGS_INITIALIZED-} ]]; then
+    bindkey -e
+    bindkey -M emacs '^[[A' history-beginning-search-backward
+    bindkey -M emacs '^[[B' history-beginning-search-forward
+    typeset -g _DOTFILES_ZSH_KEYBINDINGS_INITIALIZED=1
+fi
