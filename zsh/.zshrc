@@ -62,3 +62,7 @@ export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
 if command -v mise >/dev/null 2>&1; then
     eval "$(mise activate zsh)"
 fi
+
+# Initialize prompt and widget-mutating tools before syntax highlighting.
+source "$DOTFILES_ROOT/zsh/prompt"
+source "$DOTFILES_ROOT/zsh/plugins"

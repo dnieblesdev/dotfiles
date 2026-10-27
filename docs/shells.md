@@ -118,9 +118,43 @@ before the first load is replaced by the documented Emacs initial default;
 non-Emacs maps and bindings installed after that load are not changed. No
 substring-search plugin is installed.
 
-Run `python3 dotlink/tests/shells.py` for isolated startup regressions and
-`python3 dotlink/tests/zsh-native.py` for native history and ZLE regressions;
-Python 3, Bash and Zsh are test dependencies, not shell startup dependencies.
+### Optional Zsh plugins and prompt
+
+The repository does not install or download Zsh plugins. `zsh-autosuggestions`
+and `zsh-syntax-highlighting` are optional; absent or unreadable files are
+silently skipped. Set `ZSH_AUTOSUGGEST_SCRIPT` or
+`ZSH_SYNTAX_HIGHLIGHTING_SCRIPT` to an explicit script path, or place each
+plugin at `$XDG_DATA_HOME/zsh/plugins/<plugin>/<plugin>.zsh` (defaulting to
+`~/.local/share/zsh/plugins/...`). An explicitly configured but invalid path is
+not replaced with a guessed system path. Plugin initialization is guarded for
+rc reloads. Completion initialization precedes tools and prompt setup; prompt
+widgets and fzf are initialized before syntax highlighting. Syntax highlighting
+is loaded last because it wraps every widget defined before it.
+
+Fzf integration uses the official `fzf --zsh` output when the installed version
+is at least 0.48.0 and ZLE is attached to a terminal. This avoids registering
+interactive widgets in non-terminal `zsh -ic` contexts. Older versions are not
+guessed; an explicit `FZF_ZSH_SCRIPT` may name a matching installed integration
+script. Explicit paths, including empty or invalid values, are authoritative and
+skip discovery. Fzf is otherwise optional and silent.
+
+Zsh's prompt selector is `DOTFILES_ZSH_PROMPT=starship|powerlevel10k|none`;
+Starship is the default. Powerlevel10k requires
+`POWERLEVEL10K_ZSH_THEME_FILE` to name its installed theme script. When selected,
+the entrypoint exports Powerlevel10k's supported
+`POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true` for this shell session before
+loading and activating the theme; it does not persist settings or generate a
+`.p10k.zsh` file. An unknown selector makes no prompt change. Selection is made
+once per process, so reloads
+do not switch backends. Existing Powerlevel10k functions prevent Starship from
+being initialized; the two backends are never initialized together. This does
+not alter or source the real user's Zsh configuration automatically.
+
+Run `python3 dotlink/tests/shells.py` for isolated startup regressions,
+`python3 dotlink/tests/zsh-native.py` for native history and ZLE regressions,
+and `python3 dotlink/tests/zsh-integrations.py` for optional integrations and
+prompt selection. Python 3, Bash and Zsh are test dependencies, not shell startup
+dependencies.
 
 ## Startup contract and verification limits
 
@@ -166,6 +200,9 @@ live under a temporary test HOME and are removed by test teardown.
 | zoxide | Optional; guarded against reinitialization by generated function | Optional; guarded against reinitialization by generated function | Optional; guarded against reinitialization by generated function |
 | User configuration | NVM and other user-owned integrations are optional; not installed or replaced | Same; distribution Zsh frameworks are not sourced by the module | `config.fish`, universal variables and distribution settings are user-owned |
 | Startup files managed | `.bashrc` | `.zshrc` | Repository-owned individual snippets, not `config.fish` |
+| History | Existing Bash policy; private backup retained for adoption | Native incremental history; no automatic live sharing; adjacent duplicates only | Fish-native policy; unchanged |
+| Optional prompt | Repository prompt | Starship default; optional Powerlevel10k or none, never both | Pure |
+| Optional integrations | mise/zoxide when installed | Autosuggestions, syntax highlighting, official fzf integration when available | mise/zoxide when installed |
 
 Bash and Zsh intentionally use the standard mise activation policy. Fish's
 first-prompt callback and aggressive activation are a deliberate Fish-specific
@@ -179,9 +216,21 @@ The isolated shell suite requires Python 3, Bash, Zsh, and GNU/Linux utilities
 used by the startup fragments (including GNU `readlink` and coreutils). Shells
 and tools are not installed by this repository. Tests use a bounded executable
 allowlist; this is not a substitute for running on each target distribution.
-No HOME migration or login-file migration was applied. Residual risks include
-external files changing PATH or prompts after the repository rc, compiled/global
-Zsh startup behavior, and actual WSL distribution differences.
+Dotlink does not automatically migrate HOME or login files. Bash can be adopted
+independently after a verified private backup; its user-owned `.bash_profile`
+remains untouched. To adopt Zsh later,
+first inspect `bin/dotlink status zsh`; if the real `~/.zshrc` is a conflict,
+stop and preserve it unchanged. After separately creating and verifying a private
+backup, move the original `.zshrc` to that backup location, then run
+`bin/dotlink link zsh` and `bin/dotlink verify zsh`. Rollback: run
+`bin/dotlink unlink zsh` (which removes only a proven repository symlink), verify
+the link is gone, then restore the verified backup to `~/.zshrc`. Do not overwrite
+an unexpected file or symlink during rollback. This procedure is documentation
+only; real Zsh adoption was not performed.
+
+Residual risks include external files changing PATH or prompts after the
+repository rc, compiled/global Zsh startup behavior, and actual WSL distribution
+differences.
 
 ## Session boundaries
 
