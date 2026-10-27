@@ -1,6 +1,6 @@
 # Portable shell experience and adoption
 Branch: `feat/portable-zsh-experience`; baseline `bf11aff`. Adopt Bash only; preserve real Zsh/Fish.
-Delivery: reviewable local units, then user-authorized PR/merge; checks: isolated focused tests, real Bash probes, `make all`.
+Delivery: `feature-branch-chain`, user-selected tracker plus two child PRs; checks: isolated focused tests, real Bash probes, `make all`.
 
 ## Specs
 S1. "Está autorizada exclusivamente la adopción de Bash utilizando el procedimiento reversible previamente verificado." "Si existe deriva, detente antes de modificar archivos reales." "Conserva .bash_profile intacto." "No cambies el shell predeterminado."
@@ -14,10 +14,10 @@ S8. "Actualiza docs/shells.md y la documentación pertinente." "No está autoriz
 
 ## Tasks
 T1 | S1,S5 | inline live operation | done | no drift; private backup $HOME/.local/state/dotfiles-adoption/bash.am6t0ri_; real login/nonlogin PASS; profile and real Zsh unchanged; no source commit
-T2 | S2,S3,S7 | delegated native-history/editing unit (context backstop) | in_progress | tests, docs, commit and review pending
-T3 | S4,S5,S7 | delegated optional-integrations/prompt unit (context backstop) | pending | tests, docs, commit and review pending
-T4 | S6,S7,S8 | inline + independent verification | pending | three-shell seam tests, isolated Zsh adoption, final diff and reviews pending
-T5 | S8 | inline remote delivery | pending | approved scoped issue, PR/checks/merge/master sync pending
+T2 | S2,S3,S7 | delegated native-history/editing unit (context backstop) | done | commit0fbe357 (389 authored lines); 8 tests/make all PASS; independent4blocker correction recheck PASS; native review-5ea45156df406c61 approved and acknowledged
+T3 | S4,S5,S7 | delegated optional-integrations/prompt unit (context backstop) | done | ede45ba (417 lines); 5 real-feature tests and suite PASS; independent B1/B2 correction recheck PASS; native review-a9089b534367a308 approved and acknowledged
+T4 | S6,S7,S8 | inline + independent verification | done | final make all PASS; independent 3-shell/Pure/project/reload/startup seams and isolated Zsh adoption PASS; diff checks and live Bash/profile/Zsh integrity PASS
+T5 | S8 | inline remote delivery | in_progress | feature-branch-chain selected; scoped issue status:approved + Closes explicitly authorized; final docs/preparation commit and remote delivery pending
 
 ## Log
 L1. Original request (verbatim):
@@ -201,6 +201,14 @@ Presenta:
 7. Pasos exactos pendientes para adoptar Zsh en CachyOS.
 
 El objetivo es una experiencia de desarrollo portable y mantenible, no reproducir todos los detalles de CachyOS ni maximizar la cantidad de funcionalidades.
+
+L7. Human delivery decisions: selected "Cadena con rama tracker" and "Crear con status:approved y cerrar con la PR". User initially asked "porque me vas a commitear las pruebas ? es mi dotfiles. no van pruebas en mi dotfiles :D", then accepted the deployment distinction with "ah dale, entonces está bien". Tests remain versioned under dotlink/tests, never linked or sourced into HOME. Planned chain: tracker feat/portable-shell-integration at3b81fd6 -> master (draft/no merge until children complete); child1 feat/zsh-native-history at0fbe357 -> tracker; child2 feat/portable-zsh-experience -> child1, retarget to tracker after child1 lands. Preserve reviewed commits, no rebase/force. Child1 389lines, child2 417lines plus passive closure docs; modest advisory overage is cohesive code+tests+docs and no repository size gate was found. Final tracker represents integration-test evidence, not a new accumulated native review. Remote creation/merge remains conditional on checks and diff hygiene.
+
+L6. Final make all PASS (native8, integrations5, prior startup8/tool7 plus dotlink/Fish/boundary checks); diffchecks PASS. The combined status bash zsh probe returned1 only because real Zsh deliberately remains a conflict; it prevented a shell && tail, not tests. That skipped tail (verify Bash plus live backup/profile/Zsh integrity) was executed separately and PASS. All source changes confined to Zsh/tests/Makefile/docs; source Bash/Fish/env/dotlink unchanged. Real Bash remains adopted, profile unchanged, real .zshrc still exactly sources CachyOS. Native T3 review-a9089b534367a308 approved and acknowledged, informational R4-001 plugins:21-22 nonblocking; no aggregate native approval claimed. ShellCheck unavailable/not run, actual WSL and real NVM remain unverified; isolated tests use installed plugins/fzf/prompts/mise/zoxide/Pure. Remote read confirms dnieblesdev ADMIN, default master, master/origin master unchanged bf11aff, rules[], existing approved issues closed and unrelated/broader issue3 open. Publication must resolve ~1007-line delivery shape and scoped approved issue label; no push/PR/merge yet. Full-document memory mirror to be synchronized at this checkpoint.
+
+L5. Optional integrations unit ede45ba: explicit/generic portable paths, no downloads/manager, official fzf terminal-gated, once-on-reload, prompt selection exclusive. Initial worker fzf noTTY regression corrected. Independent verifier mvpw17ae-9-rebv found highlighter-before-Starship and actual p10k wizard; one correction/recheck mvpwrqj4-b-vlsc PASS. RealPTY suggestions acceptance, red highlight region, fzf insertion, first p10k prompt with wizard flag initially unset now pinned. Native4lens review-a9089b534367a308 approved and exact acknowledgement burned; informational R4-001 plugins:21-22 nonblocking. Independent three-shell real mise/zoxide A/B/A, isolated Pure rendering/reload, startup matrix and future isolated Zsh adoption/rollback PASS. Source scope excludes Bash/Fish/shared implementation changes. Final seam suite and remote delivery pending.
+
+L4. Native history/editing unit0fbe357: RED then GREEN actualPTY capture/concurrency/editing. Independent verifier found empty-HISTFILE, /dev/nulloptout, large-history loss and inherited pruning; one bounded correction and limited recheck PASS all4, including12050records+5markers preserved and no automatic cross-session import. Native4lens review-5ea45156df406c61 approved and exact acknowledgement burned authority; informational R3-001 history:11 nonblocking, no correction route. Each unit is reviewed separately; tracker207lines not accumulated into code review. No delivery decision implies permission to bypass policy.
 
 L3. Bash adopted safely: verified copies and retained .bashrc.original under private0700 $HOME/.local/state/dotfiles-adoption/bash.am6t0ri_. Real .bashrc -> repository bash/.bashrc; dotlink verify PASS. Actual interactive login and nonlogin startup PASS exit0/exact stdout/no stderr for mise,zoxide,dev,ll,repo PS1. Histfile /dev/null and XDG/mise state temporary/offline; no tool configuration changes. .bash_profile and real .zshrc bytes/mode/mtime unchanged; no default-shell change or rollback. Keep this result independent from any Zsh blocker.
 

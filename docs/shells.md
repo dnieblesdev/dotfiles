@@ -216,7 +216,9 @@ The isolated shell suite requires Python 3, Bash, Zsh, and GNU/Linux utilities
 used by the startup fragments (including GNU `readlink` and coreutils). Shells
 and tools are not installed by this repository. Tests use a bounded executable
 allowlist; this is not a substitute for running on each target distribution.
-No HOME migration or login-file migration was applied. To adopt Zsh later,
+Dotlink does not automatically migrate HOME or login files. Bash can be adopted
+independently after a verified private backup; its user-owned `.bash_profile`
+remains untouched. To adopt Zsh later,
 first inspect `bin/dotlink status zsh`; if the real `~/.zshrc` is a conflict,
 stop and preserve it unchanged. After separately creating and verifying a private
 backup, move the original `.zshrc` to that backup location, then run
