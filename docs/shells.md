@@ -57,8 +57,9 @@ remains `~/.dotfiles`.
 Machine settings are opt-in: export `WORKSPACE`, `JAVA_HOME`, `FLUTTER_HOME`,
 `ANDROID_HOME` or `ANDROID_SDK_ROOT` before loading the rc. Tool directories are
 added only if present. Neither Linux nor WSL assigns a personal mount path.
-Cargo and NVM remain optional user-owned integrations. Bash and Zsh load NVM
-only when its function is not already present, so re-sourcing the rc does not
+Cargo and NVM remain optional user-owned integrations. NVM uses a nonempty
+caller-provided `NVM_DIR`, defaulting to `~/.nvm` when unset or empty.
+Bash and Zsh load NVM only when its function is not already present, so re-sourcing the rc does not
 re-run NVM initialization. The completion guard checks NVM's generated `__nvm`
 function; this implementation detail is tested with a synthetic fixture.
 
