@@ -220,8 +220,25 @@ class ToolStartup(unittest.TestCase):
                 rc = str(self.repo / ("bash/.bashrc" if shell == "bash" else "zsh/.zshrc"))
                 code = (f"source '{rc}'; source '{rc}'; "
                         "printf 'counts:%s:%s:%s\\n' \"$NVM_LOADS\" \"$NVM_COMPLETIONS\" "
-                        "\"$(typeset -f __nvm >/dev/null && echo present || echo absent)\"")
-                self.assert_run(shell, code, "counts:1:1:present\n")
+                        "\"$(typeset -f __nvm >/dev/null && echo present || echo absent)\"; "
+                        "printf 'dir:%s\\n' \"$NVM_DIR\"")
+                self.assert_run(shell, code, f"counts:1:1:present\ndir:{self.home / '.nvm'}\n")
+
+    def test_custom_nvm_directory_is_respected_on_reload(self):
+        custom = self.base / "custom nvm"
+        (self.home / ".nvm").rename(custom)
+        self.base_env["NVM_DIR"] = str(custom)
+        for shell in ("bash", "zsh"):
+            with self.subTest(shell=shell):
+                rc = str(self.repo / ("bash/.bashrc" if shell == "bash" else "zsh/.zshrc"))
+                code = (f"source '{rc}'; source '{rc}'; "
+                        "printf 'dir:%s loads:%s completions:%s\\n' "
+                        "\"$NVM_DIR\" \"$NVM_LOADS\" \"$NVM_COMPLETIONS\"; "
+                        "nvm; __nvm; "
+                        "case \":$PATH:\" in *\":$NVM_DIR/bin:\"*) printf 'path:present\\n';; esac")
+                self.assert_run(shell, code,
+                                f"dir:{custom} loads:1 completions:1\npath:present\n",
+                                path=str(self.no_tools))
 
     def test_actual_prior_mise_activation_is_reconciled_on_reload(self):
         self.require_tools("mise", "zoxide")
