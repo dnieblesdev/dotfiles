@@ -95,7 +95,9 @@ Duplicate or nested destinations
 across distinct selected mappings, whether explicit or legacy, are rejected before
 writes. Repeating a module argument or profile member is not a second mapping:
 link processes that module once, while list/status keep their historical selection
-output. Declaring duplicate destinations inside a module remains an error.
+output. Declaring duplicate destinations inside a module remains an error, and it
+is reported by the parser as `duplicate target` or `nested target` at the offending
+`target` line, so every command rejects it even when that module is unselected.
 
 Only blank lines and full-line `#` comments are ignored. Split properties at the
 first `=` and trim surrounding spaces and tabs; internal spaces, `#`, `$`, `*`

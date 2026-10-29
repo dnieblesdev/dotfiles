@@ -270,6 +270,21 @@ class MappingsTest(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.snapshot(outside), [])
 
+    def test_duplicate_targets_inside_a_module_are_a_parse_error(self):
+        # A present invalid file is rejected for every command, including modules
+        # the command did not select, and the diagnostic names the parser cause.
+        config = "[module agents]\n[link]\nsource=skills\ntarget=.agents/skills\n[link]\nsource=skills\ntarget=.agents/skills\n"
+        self.config.write_text(config)
+        for args in (("link", "git"), ("list",), ("list", "git"), ("link", "agents"),
+                     ("status", "agents"), ("verify", "agents"), ("unlink", "agents")):
+            with self.subTest(args=args):
+                self.expect(args, 1, err=f"dotlink: {self.config}:7: agents: duplicate target\n")
+                self.assertEqual(self.snapshot(), [])
+        self.config.write_text(
+            "[module agents]\n[link]\nsource=skills\ntarget=.agents\n[link]\nsource=skills\ntarget=.agents/skills\n")
+        self.expect(("list",), 1, err=f"dotlink: {self.config}:7: agents: nested target\n")
+        self.assertEqual(self.snapshot(), [])
+
     def test_duplicates_and_overlaps_across_explicit_and_legacy_are_atomic(self):
         for target in (".bashrc", ".bashrc/child"):
             self.config.write_text(f"[module git]\n[link]\nsource=.gitconfig\ntarget={target}\n")
@@ -277,7 +292,7 @@ class MappingsTest(unittest.TestCase):
                         err=f"dotlink: overlapping targets: {self.home / '.bashrc'} and {self.home / target}\n")
             self.assertEqual(self.snapshot(), [])
         self.mapping(["same", "same"])
-        self.expect(("link", "bash"), 1, err=f"dotlink: overlapping targets: {self.home / 'same'} and {self.home / 'same'}\n")
+        self.expect(("link", "bash"), 1, err=f"dotlink: {self.config}:7: bash: duplicate target\n")
         self.assertEqual(self.snapshot(), [])
 
     def test_repeated_module_arguments_keep_legacy_behaviour(self):

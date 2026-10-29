@@ -8,7 +8,9 @@ MAPPING_LINES=()
 MAPPING_DECLARED=()
 
 mapping_error() {
-    local message="$MAPPING_FILE:$MAPPING_LINE: "
+    # Optional second argument reports a line other than the current one.
+    local line="${2:-$MAPPING_LINE}"
+    local message="$MAPPING_FILE:$line: "
     [ -z "$MAPPING_MODULE" ] || message+="$MAPPING_MODULE: "
     warn "$message$1"
     return 1
@@ -33,6 +35,18 @@ mapping_finish_link() {
     [ "$MAPPING_HAVE_SOURCE" -eq 1 ] && [ "$MAPPING_HAVE_TARGET" -eq 1 ] || {
         mapping_error 'link requires source and target'; return 1;
     }
+    # Destinations repeat or nest only among links declared in the same module.
+    # This is a configuration error, so it is rejected at parse time for every
+    # command instead of surfacing later as a selected-inventory overlap.
+    local i other
+    for ((i=0; i<${#MAPPING_MODULES[@]}; i++)); do
+        [ "${MAPPING_MODULES[$i]}" = "$MAPPING_MODULE" ] || continue
+        [ "${MAPPING_BASES[$i]}" != "$MAPPING_BASE" ] && continue
+        other="${MAPPING_TARGETS[$i]}"
+        [ "$MAPPING_TARGET" != "$other" ] || { mapping_error 'duplicate target' "$MAPPING_TARGET_LINE"; return 1; }
+        case "$MAPPING_TARGET/" in "$other/"*) mapping_error 'nested target' "$MAPPING_TARGET_LINE"; return 1 ;; esac
+        case "$other/" in "$MAPPING_TARGET/"*) mapping_error 'nested target' "$MAPPING_TARGET_LINE"; return 1 ;; esac
+    done
     MAPPING_MODULES+=("$MAPPING_MODULE")
     MAPPING_SOURCES+=("$MAPPING_SOURCE")
     MAPPING_TARGETS+=("$MAPPING_TARGET")
@@ -51,7 +65,7 @@ mapping_finish_module() {
 
 mapping_load() {
     local MAPPING_FILE="$REPO_ROOT/dotlink/modules.conf" MAPPING_LINE=0 MAPPING_MODULE=""
-    local MAPPING_LINK=0 MAPPING_COUNT=0 MAPPING_LINK_LINE=0
+    local MAPPING_LINK=0 MAPPING_COUNT=0 MAPPING_LINK_LINE=0 MAPPING_TARGET_LINE=0
     local MAPPING_HAVE_SOURCE=0 MAPPING_HAVE_TARGET=0 MAPPING_HAVE_BASE=0
     local MAPPING_SOURCE="" MAPPING_TARGET="" MAPPING_BASE="home"
     local line key value byte known
@@ -88,7 +102,7 @@ mapping_load() {
             mapping_finish_link || return 1
             MAPPING_LINK=1; MAPPING_LINK_LINE="$MAPPING_LINE"
             MAPPING_HAVE_SOURCE=0; MAPPING_HAVE_TARGET=0; MAPPING_HAVE_BASE=0
-            MAPPING_SOURCE=""; MAPPING_TARGET=""; MAPPING_BASE=home
+            MAPPING_SOURCE=""; MAPPING_TARGET=""; MAPPING_BASE=home; MAPPING_TARGET_LINE=0
         elif [[ "$line" = *'='* ]]; then
             [ "$MAPPING_LINK" -eq 1 ] || { mapping_error 'property outside link'; return 1; }
             key="$(mapping_trim "${line%%=*}")"
@@ -104,7 +118,7 @@ mapping_load() {
                 target)
                     [ "$MAPPING_HAVE_TARGET" -eq 0 ] || { mapping_error 'duplicate target'; return 1; }
                     mapping_path_valid "$value" || { mapping_error 'invalid target path'; return 1; }
-                    MAPPING_HAVE_TARGET=1; MAPPING_TARGET="$value" ;;
+                    MAPPING_HAVE_TARGET=1; MAPPING_TARGET="$value"; MAPPING_TARGET_LINE="$MAPPING_LINE" ;;
                 base)
                     [ "$MAPPING_HAVE_BASE" -eq 0 ] || { mapping_error 'duplicate base'; return 1; }
                     case "$value" in home|xdg_config) ;; *) mapping_error 'invalid base'; return 1 ;; esac
