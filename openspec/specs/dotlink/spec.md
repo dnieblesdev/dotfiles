@@ -4,12 +4,12 @@
 
 ### Requirement: Opt-in structured report for link
 
-The system SHALL accept `--report=json` and `--report=json` only as an option of `bin/dotlink link`. When the option is absent, the system SHALL preserve the existing CLI parsing, stdout, stderr, link behavior, and exit-code semantics.
+The system SHALL accept `--report=json` and `--report=json` only as an option of `bin/dotlink link`. When the option is absent, the system SHALL use human-oriented output. Both modes SHALL attempt all safe selected entries, retain successes after individual failures, and finish with created/unchanged/failed counts (stderr in JSON mode).
 
 #### Scenario: Legacy link invocation
 
 - **WHEN** a user invokes `bin/dotlink link` without `--report`
-- **THEN** the system preserves its existing human-oriented behavior and output
+- **THEN** the system emits human-oriented progress, per-entry errors, and a final summary
 
 #### Scenario: Report option on another command
 
@@ -42,32 +42,33 @@ An entry outcome SHALL be one of:
 - `changed`: the symlink was created and remains after the command finishes.
 - `unchanged`: the target already linked to the requested source and was not modified.
 - `failed`: the entry could not be linked because of a conflict or operational cause.
-- `rolled_back`: the symlink was created in this invocation and was removed because a later failure caused rollback.
+The former `rolled_back` outcome is no longer emitted for earlier successes: later failures do not remove successful links.
 
 #### Scenario: Already-linked target
 
 - **WHEN** a selected entry already links to its requested source
 - **THEN** its reported outcome is `unchanged`
 
-#### Scenario: Later conflict rolls back an earlier creation
+#### Scenario: Later conflict preserves successes and does not stop execution
 
 - **WHEN** an earlier entry is created and a later entry fails
 - **THEN** the failed entry has outcome `failed` and an explicit cause
-- **AND THEN** every earlier link removed by rollback has outcome `rolled_back`
-- **AND THEN** no rolled-back entry is represented as `changed`
+- **AND THEN** the earlier success remains `changed` and stays linked
+- **AND THEN** later safe entries are attempted and reported
 
 ### Requirement: Aggregate outcome, failure, and rollback reporting
 
-The report SHALL include an aggregate `status` that is `success` only when all selected entries complete without failure and no rollback occurs; otherwise it SHALL be `failed`. It SHALL include a `rollback` object stating whether rollback was attempted and completed, plus the targets removed and parent directories removed when applicable.
+The report SHALL include an aggregate `status` that is `success` only when all selected entries complete without failure; otherwise it SHALL be `failed`. The existing `rollback` object SHALL describe cleanup of incomplete failed-entry changes only, never removal of earlier successes. Its completed flag SHALL be false if any attempted cleanup failed.
 
-For any failure, the report SHALL include a `failure` object with the failed module and a machine-readable cause code. If failure occurs while processing a link entry, `failure` SHALL also include that entry's `source` and `target`, and the corresponding entry SHALL have outcome `failed`. If selection fails before an entry can be resolved, `failure` SHALL identify the affected module when available and use `null` for unavailable source or target values.
+For any failure, the report SHALL include a `failure` object identifying the first failed entry/module and a machine-readable cause code; every later failure SHALL also appear in its ordered entry. If failure occurs while processing a link entry, `failure` SHALL also include that entry's `source` and `target`, and the corresponding entry SHALL have outcome `failed`. If selection fails before an entry can be resolved, `failure` SHALL identify the affected module when available and use `null` for unavailable source or target values.
 
 #### Scenario: Conflict failure
 
 - **WHEN** a selected target is a regular file, directory, foreign symlink, or unproven broken symlink
 - **THEN** the aggregate status is `failed`
 - **AND THEN** the report identifies the failed entry and a conflict cause
-- **AND THEN** rollback metadata identifies links and directories removed by this invocation, if any
+- **AND THEN** cleanup metadata identifies only incomplete failed-entry changes removed, if any
+- **AND THEN** all other safe selected entries are attempted
 
 #### Scenario: No-op success
 

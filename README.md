@@ -58,6 +58,7 @@ There is no local software-provisioning command in this repository. This reposit
 | `env/` | Shared environment setup such as PATH, NVM, Rust, Flutter, Java, and Android SDK |
 | `git/` | Portable Git configuration linked into `$HOME` |
 | `git-win/` | Windows-only Git overrides, linked as `~/.gitconfig.win` and included by the common config |
+| `agents/` | Explicitly linked agent skills directory; not selected by profiles |
 | `wsl/` | WSL-specific environment and functions |
 | `linux/` | Native Linux-specific environment and functions |
 | `profiles/` | Declarative dotfiles profile manifests |
@@ -76,6 +77,14 @@ There is no local software-provisioning command in this repository. This reposit
 | Understand the dotfiles contract | [`docs/dotfiles-contract.md`](docs/dotfiles-contract.md) |
 
 `--profile` and explicit module arguments are mutually exclusive.
+
+`link` continues after individual failures, retains successful links, and prints a
+created/unchanged/failed summary. Exit 1 means some entries failed; it does not mean
+all work was undone. See [the lifecycle contract](docs/dotfiles-contract.md#best-effort-linking).
+
+Use `bin/dotlink link agents` to link `agents/skills` to `~/.agents/skills`;
+existing personal directories are conflicts. See the
+[mapping contract](docs/dotfiles-contract.md#explicit-module-mappings).
 
 ## Safety notes
 

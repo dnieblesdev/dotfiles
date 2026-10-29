@@ -7,6 +7,7 @@ check:
 	@echo "shell syntax checks passed"
 
 test:
+	@python3 dotlink/tests/mappings.py
 	@dotlink/tests/run.sh
 	@bash dotlink/tests/fish.sh
 	@python3 dotlink/tests/shells.py

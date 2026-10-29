@@ -20,15 +20,19 @@ expect() {
     printf '%s' "$err" >"$TMP/expected"
     cmp "$TMP/expected" "$TMP/err"
 }
+created_summary=$'dotlink: summary: created=1 unchanged=0 failed=0\n'
+unchanged_summary=$'dotlink: summary: created=0 unchanged=1 failed=0\n'
+failed_summary=$'dotlink: summary: created=0 unchanged=0 failed=1\n'
+mixed_summary=$'dotlink: summary: created=1 unchanged=0 failed=1\n'
 printf 'DOTLINK_PROFILE_MODULES=(fish)\n' > "$TMP/repo/profiles/fish-test.sh"
 # Fresh installation, custom XDG, exact lifecycle output and idempotence.
 expect 0 $'fish\n' '' "$CLI" list --profile fish-test
 expect 0 "missing"$'\tfish\t'"$TARGET"$'\n' '' "$CLI" status fish
 expect 1 "missing"$'\tfish\t'"$TARGET"$'\n' '' "$CLI" verify fish
-expect 0 "dotlink: linked $TARGET -> $SRC"$'\n' '' "$CLI" link fish
+expect 0 "dotlink: linked $TARGET -> $SRC"$'\n'"$created_summary" '' "$CLI" link fish
 [ -L "$TARGET" ] && [ "$(readlink "$TARGET")" = "$SRC" ]
 [ ! -e "$HOME/.config/fish" ]
-expect 0 '' '' "$CLI" link fish
+expect 0 "$unchanged_summary" '' "$CLI" link fish
 expect 0 "linked"$'\tfish\t'"$TARGET"$'\n' '' "$CLI" status fish
 expect 0 '' '' "$CLI" verify fish
 # Existing config and neighboring snippets remain user-owned.
@@ -47,18 +51,18 @@ for kind in file directory symlink broken; do
         broken) ln -s "$TMP/absent" "$TARGET" ;;
     esac
     before="$(ls -ld "$TARGET")"
-    expect 1 '' "dotlink: conflict: refusing to replace $TARGET"$'\n' "$CLI" link fish
+    expect 1 "$failed_summary" "dotlink: conflict: refusing to replace $TARGET"$'\n' "$CLI" link fish
     expect 1 "conflict"$'\tfish\t'"$TARGET"$'\n' '' "$CLI" status fish
     expect 1 "conflict"$'\tfish\t'"$TARGET"$'\n' '' "$CLI" verify fish
     expect 1 '' "dotlink: conflict: refusing to unlink $TARGET"$'\n' "$CLI" unlink fish
     [ "$before" = "$(ls -ld "$TARGET")" ]
     if [ "$kind" = directory ]; then rmdir "$TARGET"; else rm "$TARGET"; fi
  done
-# A later conflict rolls back only new links, not existing user files.
+# A later conflict preserves earlier successes and leaves foreign files unchanged.
 printf '# second\n' > "${SRC%/*}/zz-conflict.fish"
 printf 'foreign\n' > "${TARGET%/*}/zz-conflict.fish"
-expect 1 "dotlink: linked $TARGET -> $SRC"$'\n' "dotlink: conflict: refusing to replace ${TARGET%/*}/zz-conflict.fish"$'\n' "$CLI" link fish
-[ ! -L "$TARGET" ]
+expect 1 "dotlink: linked $TARGET -> $SRC"$'\n'"$mixed_summary" "dotlink: conflict: refusing to replace ${TARGET%/*}/zz-conflict.fish"$'\n' "$CLI" link fish
+[ -L "$TARGET" ]
 grep -qx foreign "${TARGET%/*}/zz-conflict.fish"
 rm "${SRC%/*}/zz-conflict.fish" "${TARGET%/*}/zz-conflict.fish"
 # No config.fish, functions or mutable files from the source are selected.
@@ -67,14 +71,14 @@ printf 'ignored\n' > "$TMP/repo/fish/.config/fish/config.fish"
 for mode in empty unset; do
     if [ "$mode" = empty ]; then export XDG_CONFIG_HOME=''; else unset XDG_CONFIG_HOME; fi
     TARGET="$HOME/.config/fish/conf.d/dotfiles.fish"
-    expect 0 "dotlink: linked $TARGET -> $SRC"$'\n' '' "$CLI" link fish
+    expect 0 "dotlink: linked $TARGET -> $SRC"$'\n'"$created_summary" '' "$CLI" link fish
     [ ! -e "$HOME/.config/fish/config.fish" ]
     expect 0 '' '' "$CLI" verify fish
     expect 0 "dotlink: unlinked $TARGET"$'\n' '' "$CLI" unlink fish
  done
 # Relative XDG is invalid, never interpreted relative to the working directory.
 export XDG_CONFIG_HOME=relative
-expect 1 '' $'dotlink: XDG_CONFIG_HOME must be an absolute path\n' "$CLI" link fish
+expect 1 "$failed_summary" $'dotlink: XDG_CONFIG_HOME must be an absolute path\n' "$CLI" link fish
 
 # Fish rejects every symbolic-link component before examining or creating targets.
 # This includes valid and broken links at XDG_CONFIG_HOME and below it.
@@ -107,7 +111,7 @@ for kind in valid broken; do
         [ "$component" = xdg ] || guarded="$guarded/fish"
         [ "$component" != conf.d ] || guarded="$guarded/conf.d"
         printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$guarded"
-        expect 1 '' "$expected_err" "$CLI" link fish
+        expect 1 "$failed_summary" "$expected_err" "$CLI" link fish
         [ ! -e "$TMP/guard/outside/dotfiles.fish" ] && [ ! -L "$TMP/guard/outside/dotfiles.fish" ]
         [ -L "$guarded" ]
     done
@@ -119,7 +123,7 @@ mkdir -p "$TMP/guard/real/xdg" "$TMP/guard/outside"
 ln -s "$TMP/guard/real" "$TMP/guard/ancestor"
 export XDG_CONFIG_HOME="$TMP/guard/ancestor/xdg"
 printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$TMP/guard/ancestor"
-expect 1 '' "$expected_err" "$CLI" link fish
+expect 1 "$failed_summary" "$expected_err" "$CLI" link fish
 [ ! -e "$TMP/guard/real/xdg/fish" ]
 
 # Existing links are rejected too when reached through a symbolic ancestor.
@@ -127,21 +131,21 @@ rm -rf "$TMP/guard"
 mkdir -p "$TMP/guard/real/xdg/fish/conf.d"
 export XDG_CONFIG_HOME="$TMP/guard/real/xdg"
 TARGET="$XDG_CONFIG_HOME/fish/conf.d/dotfiles.fish"
-expect 0 "dotlink: linked $TARGET -> $SRC"$'\n' '' "$CLI" link fish
+expect 0 "dotlink: linked $TARGET -> $SRC"$'\n'"$created_summary" '' "$CLI" link fish
 ln -s "$TMP/guard/real/xdg" "$TMP/guard/alias"
 export XDG_CONFIG_HOME="$TMP/guard/alias"
 printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$TMP/guard/alias"
-expect 1 '' "$expected_err" "$CLI" link fish
+expect 1 "$failed_summary" "$expected_err" "$CLI" link fish
 [ -L "$TMP/guard/real/xdg/fish/conf.d/dotfiles.fish" ]
 
-# A Fish ancestor failure rolls back earlier links from the same invocation.
+# A Fish ancestor failure preserves an earlier Bash success.
 rm -rf "$TMP/guard" "$HOME/.bashrc"
 mkdir -p "$TMP/guard/outside"
 ln -s "$TMP/guard/outside" "$TMP/guard/alias"
 export XDG_CONFIG_HOME="$TMP/guard/alias"
 printf -v expected_err 'dotlink: conflict: parent is not a real directory: %s\n' "$TMP/guard/alias"
-expect 1 "dotlink: linked $HOME/.bashrc -> $TMP/repo/bash/.bashrc"$'\n' "$expected_err" "$CLI" link bash fish
-[ ! -e "$HOME/.bashrc" ] && [ ! -L "$HOME/.bashrc" ]
+expect 1 "dotlink: linked $HOME/.bashrc -> $TMP/repo/bash/.bashrc"$'\n'"$mixed_summary" "$expected_err" "$CLI" link bash fish
+[ -L "$HOME/.bashrc" ]
 [ ! -e "$TMP/guard/outside/fish" ]
 
 # Ordinary directories remain valid, including creation of missing descendants.
@@ -149,16 +153,16 @@ rm -rf "$TMP/guard"
 mkdir -p "$TMP/guard/ordinary"
 export XDG_CONFIG_HOME="$TMP/guard/ordinary/new/xdg"
 TARGET="$XDG_CONFIG_HOME/fish/conf.d/dotfiles.fish"
-expect 0 "dotlink: linked $TARGET -> $SRC"$'\n' '' "$CLI" link fish
-expect 0 '' '' "$CLI" link fish
+expect 0 "dotlink: linked $TARGET -> $SRC"$'\n'"$created_summary" '' "$CLI" link fish
+expect 0 "$unchanged_summary" '' "$CLI" link fish
 expect 0 '' '' "$CLI" verify fish
 [ -L "$TARGET" ]
 
 # Dot and dot-dot components are ambiguous and are rejected, not normalized.
 export XDG_CONFIG_HOME="$TMP/guard/ordinary/./xdg"
-expect 1 '' $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
+expect 1 "$failed_summary" $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
 export XDG_CONFIG_HOME="$TMP/guard/ordinary/../other"
-expect 1 '' $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
+expect 1 "$failed_summary" $'dotlink: Fish destination may not contain . or .. components\n' "$CLI" link fish
 # zoxide activation is isolated from the user's Fish configuration and binaries.
 FISH_BIN="$(command -v fish)" || { printf 'fish is required for Fish tests\n' >&2; exit 1; }
 mkdir -p "$TMP/zoxide-bin" "$TMP/no-zoxide-bin"

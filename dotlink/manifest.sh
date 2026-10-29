@@ -5,7 +5,7 @@ set -euo pipefail
 DOTLINK_PROFILE_NAME=""
 DOTLINK_PROFILE_DESCRIPTION=""
 DOTLINK_PROFILE_MODULES=()
-DOTLINK_KNOWN_MODULES=(bash git git-win zsh config fish)
+DOTLINK_KNOWN_MODULES=(bash git git-win zsh config fish agents)
 # Known modules that only apply to some platforms. `status` and `verify` report them
 # as `skip` when they are absent, so a Linux/WSL host does not fail the all-module scan.
 DOTLINK_OPTIONAL_MODULES=(git-win)
