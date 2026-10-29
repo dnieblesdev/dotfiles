@@ -143,7 +143,8 @@ exec '{real_grep}' "$@"
         result = subprocess.run([str(ROOT / "bin/dotlink"), "link", "zsh"], env=env,
                                 cwd=ROOT, capture_output=True, text=True, timeout=15)
         self.assertEqual((result.returncode, result.stdout, result.stderr),
-                         (1, "", f"dotlink: conflict: refusing to replace {target}\n"))
+                         (1, "dotlink: summary: created=0 unchanged=0 failed=1\n",
+                          f"dotlink: conflict: refusing to replace {target}\n"))
         self.assertEqual({path: path.read_bytes() for path in protected}, before)
 
     def test_relocated_checkout_without_optional_tools(self):

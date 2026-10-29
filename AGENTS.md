@@ -37,7 +37,7 @@ Rules you must respect:
   When an optional module is not linked, `status` reports `skip` and `verify` does not fail;
   a linked-but-broken optional module still reports `drift` or `conflict` and fails normally.
 - `unlink` removes **only** symlinks it can prove point into this repository. It will not touch foreign files.
-- `link` rolls back only the symlinks created during a failed operation.
+- `link` attempts every safe entry, preserves successes after individual failures, and exits 1 if any entry fails. Only incomplete changes for the failed entry are cleaned up; earlier successes are never rolled back.
 
 Profiles available:
 
@@ -50,6 +50,10 @@ Profiles available:
 `bin/dotlink link git-win` creates `~/.gitconfig.win`, which the common `~/.gitconfig`
 includes via `[include]`. When the file is absent the include is silently ignored, so
 WSL and native Linux run on the common values alone.
+
+`agents` is a known module outside existing profiles. `bin/dotlink link agents` links
+`agents/skills` to `~/.agents/skills`; existing personal directories conflict. The
+`.gitkeep` marker is not a skill. See `docs/dotfiles-contract.md` for mapping rules.
 
 Note: `env/` is sourced by `.bashrc` and is **not** managed by dotlink (it contains non-hidden files).
 

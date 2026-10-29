@@ -7,6 +7,8 @@ DOTLINK_HOME="${DOTLINK_HOME:-$HOME}"
 
 # shellcheck source=manifest.sh
 source "$REPO_ROOT/dotlink/manifest.sh"
+# shellcheck source=mappings.sh
+source "$REPO_ROOT/dotlink/mappings.sh"
 
 usage() {
     cat <<'USAGE'
@@ -28,6 +30,11 @@ the base profile.
 Fish links only individual conf.d/*.fish files under absolute XDG_CONFIG_HOME,
 or DOTLINK_HOME/.config (HOME by default) when XDG_CONFIG_HOME is empty or unset.
 Fish is not selected by existing profiles; absent Fish links fail global verify.
+The agents module maps agents/skills to ~/.agents/skills; select it explicitly.
+Explicit mappings are declared as literal data in dotlink/modules.conf.
+link attempts all safe entries, retains successes, and exits 1 if any entry fails.
+It ends with summary: created=N unchanged=N failed=N (stderr in JSON mode).
+Only incomplete changes of a failed entry are cleaned up, never earlier successes.
 
 Dotlink manages repository-owned symlinks only. It never installs packages,
 runtimes, tools, or OS provisioning dependencies.
@@ -91,6 +98,7 @@ report_add_entry() {
 }
 
 report_set_failure() {
+    [ "$REPORT_HAS_FAILURE" -eq 0 ] || return 0
     REPORT_HAS_FAILURE=1
     REPORT_FAILURE_MODULE="$1"
     REPORT_FAILURE_SOURCE="$2"
@@ -304,21 +312,34 @@ link_matches() {
 collect_module_entries() {
     local module="$1"
     local src_dir="$REPO_ROOT/$module"
-    local file dir inner rel_path target_dir
+    local file dir inner rel_path target_dir base_error
 
     [ -d "$src_dir" ] || {
         warn "unknown module: $module"
         return 1
     }
+    if mapping_is_explicit "$module"; then
+        mapping_collect "$module"
+        return $?
+    fi
 
     # Fish shares its configuration directory with the user and vendor tooling.
     # Keep this selection separate: existing modules retain directory-level links.
     if [ "$module" = fish ]; then
         target_dir="${XDG_CONFIG_HOME:-$DOTLINK_HOME/.config}"
-        case "$target_dir" in
-            /*) ;;
-            *) warn "XDG_CONFIG_HOME must be an absolute path"; return 1 ;;
-        esac
+        base_error=""
+        if [[ "$target_dir" = *$'\n'* ]] || LC_ALL=C printf '%s' "$target_dir" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+            base_error="XDG_CONFIG_HOME contains control bytes"
+        else
+            case "$target_dir" in
+                /*) ;;
+                *) base_error="XDG_CONFIG_HOME must be an absolute path" ;;
+            esac
+        fi
+        if [ -n "$base_error" ]; then
+            printf '%s\t-\tinvalid_base\t%s\n' "$src_dir/.config/fish/conf.d" "$base_error"
+            return 0
+        fi
         while IFS= read -r -d '' file; do
             printf '%s\t%s\n' "$file" "$target_dir/fish/conf.d/$(basename "$file")"
         done < <(find "$src_dir/.config/fish/conf.d" -maxdepth 1 -type f -name '*.fish' -print0 2>/dev/null | sort -z)
@@ -488,6 +509,37 @@ entry_state() {
     fi
 }
 
+# Validate selected inventory before any lifecycle operation can write.
+validate_inventory() {
+    shift # Command is reserved for lifecycle-specific validation.
+    local module entries src target cause message prior resolved
+    local -a targets=()
+    local -A visited=()
+    for module in "$@"; do
+        # Repeating a selection is not a duplicate mapping declaration.
+        [ -z "${visited[$module]:-}" ] || continue
+        visited["$module"]=1
+        entries="$(collect_module_entries "$module")" || return 1
+        while IFS=$'\t' read -r src target cause message; do
+            [ -n "$src" ] || continue
+            [ -z "$cause" ] || continue # No destination exists for this failed resolution.
+            # Compare destination locations, not the referents of existing links.
+            # Distinct links may legitimately point to the same source.
+            resolved="$(real_path "$(dirname "$target")")"
+            resolved="${resolved%/}/$(basename "$target")"
+            for prior in "${targets[@]}"; do
+                case "$resolved/" in "$prior/"|"$prior/"*)
+                    warn "overlapping targets: $prior and $resolved"; return 1 ;;
+                esac
+                case "$prior/" in "$resolved/"*)
+                    warn "overlapping targets: $prior and $resolved"; return 1 ;;
+                esac
+            done
+            targets+=("$resolved")
+        done <<< "$entries"
+    done
+}
+
 cmd_list() {
     local modules=("$@")
     local module
@@ -498,15 +550,21 @@ cmd_list() {
 
 cmd_status() {
     local modules=("$@")
-    local module src target state entries rc=0
+    local module src target cause message state entries rc=0
     local -A seen_targets=()
 
     for module in "${modules[@]}"; do
         entries="$(collect_module_entries "$module")" || return 1
-        while IFS=$'\t' read -r src target; do
+        while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
+            if [ -n "$cause" ]; then warn "$message"; return 1; fi
+            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then return 1; fi
             seen_targets["$target"]=1
-            state="$(entry_state "$src" "$target")"
+            if mapping_is_explicit "$module" && ! validate_fish_parent_dir "$target" 2>/dev/null; then
+                state=conflict
+            else
+                state="$(entry_state "$src" "$target")"
+            fi
             # An optional module that is not present on this platform is skipped,
             # not reported as missing, so the all-module scan stays platform-safe.
             if [ "$state" = missing ] && dotlink_is_optional_module "$module"; then
@@ -518,7 +576,7 @@ cmd_status() {
     done
 
     # Surface orphaned repo-owned broken symlinks as drift.
-    while IFS=$'\t' read -r src target; do
+    while IFS=$'\t' read -r src target cause message; do
         [ -n "$target" ] || continue
         [ -z "${seen_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
@@ -531,15 +589,21 @@ cmd_status() {
 
 cmd_verify() {
     local modules=("$@")
-    local module src target state entries rc=0
+    local module src target cause message state entries rc=0
     local -A seen_targets=()
 
     for module in "${modules[@]}"; do
         entries="$(collect_module_entries "$module")" || return 1
-        while IFS=$'\t' read -r src target; do
+        while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
+            if [ -n "$cause" ]; then warn "$message"; return 1; fi
+            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then return 1; fi
             seen_targets["$target"]=1
-            state="$(entry_state "$src" "$target")"
+            if mapping_is_explicit "$module" && ! validate_fish_parent_dir "$target" 2>/dev/null; then
+                state=conflict
+            else
+                state="$(entry_state "$src" "$target")"
+            fi
             if [ "$state" != linked ]; then
                 # An absent optional module is a platform skip, not a failure.
                 # verify stays silent on success: reporting skip here would make
@@ -555,7 +619,7 @@ cmd_verify() {
     done
 
     # Orphaned repo-owned broken symlinks fail verification.
-    while IFS=$'\t' read -r src target; do
+    while IFS=$'\t' read -r src target cause message; do
         [ -n "$target" ] || continue
         [ -z "${seen_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
@@ -570,15 +634,21 @@ cmd_verify() {
 
 cmd_unlink() {
     local modules=("$@")
-    local module src target state entries rc=0
+    local module src target cause message state entries rc=0
     local -A seen_targets=()
 
     for module in "${modules[@]}"; do
         entries="$(collect_module_entries "$module")" || return 1
-        while IFS=$'\t' read -r src target; do
+        while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
+            if [ -n "$cause" ]; then warn "$message"; return 1; fi
+            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then return 1; fi
             seen_targets["$target"]=1
-            state="$(entry_state "$src" "$target")"
+            if mapping_is_explicit "$module" && ! validate_fish_parent_dir "$target" 2>/dev/null; then
+                state=conflict
+            else
+                state="$(entry_state "$src" "$target")"
+            fi
             case "$state" in
                 linked)
                     rm "$target"
@@ -594,7 +664,7 @@ cmd_unlink() {
     done
 
     # Remove orphaned repo-owned broken symlinks.
-    while IFS=$'\t' read -r src target; do
+    while IFS=$'\t' read -r src target cause message; do
         [ -n "$target" ] || continue
         [ -z "${seen_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
@@ -618,6 +688,7 @@ rollback_link() {
     local target dir i complete=1
     local -a sorted_dirs=()
 
+    if [ "$REPORT_ROLLBACK_ATTEMPTED" -eq 0 ]; then REPORT_ROLLBACK_COMPLETED=1; fi
     REPORT_ROLLBACK_ATTEMPTED=1
     for target in "${created[@]}"; do
         if [ -L "$target" ] && rm "$target"; then
@@ -643,7 +714,8 @@ rollback_link() {
             warn "rollback: unable to remove $dir"
         fi
     done
-    REPORT_ROLLBACK_COMPLETED="$complete"
+    # A later successful cleanup must not hide an earlier cleanup failure.
+    if [ "$complete" -eq 0 ]; then REPORT_ROLLBACK_COMPLETED=0; fi
 }
 
 report_mark_rolled_back() {
@@ -660,44 +732,70 @@ cmd_link() {
     local modules=("$@")
     local created=()
     local created_dirs=()
-    local module src target state entries failure_message
+    local module src target cause message state entries failure_message
+    local count_created=0 count_unchanged=0 count_failed=0
+    local -A visited=()
 
     for module in "${modules[@]}"; do
+        [ -z "${visited[$module]:-}" ] || continue
+        visited["$module"]=1
         if ! entries="$(collect_module_entries "$module")"; then
-            report_set_failure "$module" "" "" "unknown_module" "unknown module: $module"
-            return 1
+            report_set_failure "$module" "" "" "inventory_error" "unable to collect module: $module"
+            count_failed=$((count_failed + 1))
+            continue
         fi
-        while IFS=$'\t' read -r src target; do
+        while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
-            if [ "$module" = fish ] && ! validate_fish_parent_dir "$target"; then
+            created=(); created_dirs=()
+            if [ -n "$cause" ]; then
+                warn "$message"
+                report_add_entry "$module" "$src" "" "failed" "$cause" "$message"
+                report_set_failure "$module" "$src" "" "$cause" "$message"
+                count_failed=$((count_failed + 1))
+                continue
+            fi
+            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then
+                failure_message="invalid mapping source: $src"
+                report_add_entry "$module" "$src" "$target" "failed" "invalid_source" "$failure_message"
+                report_set_failure "$module" "$src" "$target" "invalid_source" "$failure_message"
+                count_failed=$((count_failed + 1))
+                continue
+            fi
+            if { [ "$module" = fish ] || mapping_is_explicit "$module"; } && ! validate_fish_parent_dir "$target"; then
                 failure_message="unable to create parent directory for $target"
                 report_add_entry "$module" "$src" "$target" "failed" "parent_conflict" "$failure_message"
                 report_set_failure "$module" "$src" "$target" "parent_conflict" "$failure_message"
-                rollback_link
-                return 1
+                count_failed=$((count_failed + 1))
+                continue
             fi
             state="$(entry_state "$src" "$target")"
             case "$state" in
                 linked)
                     report_add_entry "$module" "$src" "$target" "unchanged"
+                    count_unchanged=$((count_unchanged + 1))
                     ;;
                 missing)
                     if ! ensure_parent_dir "$target"; then
+                        created_dirs+=("${ENSURED_CREATED_DIRS[@]}")
                         failure_message="unable to create parent directory for $target"
                         report_add_entry "$module" "$src" "$target" "failed" "parent_conflict" "$failure_message"
                         report_set_failure "$module" "$src" "$target" "parent_conflict" "$failure_message"
                         rollback_link
-                        return 1
+                        count_failed=$((count_failed + 1))
+                        continue
                     fi
+                    created_dirs+=("${ENSURED_CREATED_DIRS[@]}")
                     if ! ln -s "$src" "$target"; then
                         failure_message="unable to link $target to $src"
+                        warn "$failure_message"
                         report_add_entry "$module" "$src" "$target" "failed" "link_error" "$failure_message"
                         report_set_failure "$module" "$src" "$target" "link_error" "$failure_message"
                         rollback_link
-                        return 1
+                        count_failed=$((count_failed + 1))
+                        continue
                     fi
-                    created_dirs+=("${ENSURED_CREATED_DIRS[@]}")
                     created+=("$target")
+                    count_created=$((count_created + 1))
                     report_add_entry "$module" "$src" "$target" "changed"
                     info "linked $target -> $src"
                     ;;
@@ -706,12 +804,13 @@ cmd_link() {
                     warn "$failure_message"
                     report_add_entry "$module" "$src" "$target" "failed" "conflict" "$failure_message"
                     report_set_failure "$module" "$src" "$target" "conflict" "$failure_message"
-                    rollback_link
-                    return 1
+                    count_failed=$((count_failed + 1))
                     ;;
             esac
         done <<< "$entries"
     done
+    info "summary: created=$count_created unchanged=$count_unchanged failed=$count_failed"
+    [ "$count_failed" -eq 0 ]
 }
 
 main() {
@@ -787,6 +886,21 @@ main() {
             report_render
         fi
         exit 1
+    fi
+
+    if ! mapping_load; then
+        if [ "$REPORT_MODE" = json ]; then
+            report_set_failure "" "" "" "mapping_error" "invalid mapping configuration"
+            report_render "${modules[@]}"
+        fi
+        return 1
+    fi
+    if [ "$command" != list ] && ! validate_inventory "$command" "${modules[@]}"; then
+        if [ "$REPORT_MODE" = json ]; then
+            report_set_failure "" "" "" "inventory_error" "invalid mapping inventory"
+            report_render "${modules[@]}"
+        fi
+        return 1
     fi
 
     case "$command" in

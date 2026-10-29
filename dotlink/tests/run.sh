@@ -242,7 +242,7 @@ printf 'two\n' > "$ROLLBACK_B"
 mkdir -p "$DOTLINK_HOME/.config"
 printf 'local conflict\n' > "$DOTLINK_HOME/.config/dotlink-test-b"
 if "$TMP_REPO/bin/dotlink" link --report=json config >"$TMP_ROOT/dotlink-rollback.json" 2>"$TMP_ROOT/dotlink-rollback.err"; then
-    printf 'expected config rollback conflict\n' >&2
+    printf 'expected config partial failure\n' >&2
     exit 1
 fi
 python3 - "$TMP_ROOT/dotlink-rollback.json" "$DOTLINK_HOME" <<'PY'
@@ -251,16 +251,16 @@ import sys
 report = json.load(open(sys.argv[1]))
 home = sys.argv[2]
 assert report["status"] == "failed"
-assert [entry["outcome"] for entry in report["entries"]] == ["rolled_back", "failed"]
+# Best-effort linking retains the first success and attempts the later Starship entry.
+assert [entry["outcome"] for entry in report["entries"]] == ["changed", "failed", "changed"]
 assert report["entries"][1]["cause"]["code"] == "conflict"
 assert report["failure"]["target"] == f"{home}/.config/dotlink-test-b"
-assert report["rollback"]["attempted"] is True
-assert report["rollback"]["completed"] is True
-assert report["rollback"]["removed_targets"] == [f"{home}/.config/dotlink-test-a"]
+assert report["rollback"] == {"attempted": False, "completed": False, "removed_targets": [], "removed_directories": []}
 PY
 grep -q '^dotlink: linked ' "$TMP_ROOT/dotlink-rollback.err"
 grep -q 'conflict: refusing' "$TMP_ROOT/dotlink-rollback.err"
-assert_missing "$DOTLINK_HOME/.config/dotlink-test-a"
+assert_link "$DOTLINK_HOME/.config/dotlink-test-a" "$ROLLBACK_A"
+assert_link "$DOTLINK_HOME/.config/starship.toml" "$TMP_REPO/config/.config/starship.toml"
 [ -f "$DOTLINK_HOME/.config/dotlink-test-b" ] || { printf 'rollback conflict file was removed\n' >&2; exit 1; }
 grep -q 'local conflict' "$DOTLINK_HOME/.config/dotlink-test-b"
 
@@ -470,6 +470,7 @@ if "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/fish-global-missing.out" 2>&1; th
 fi
 grep -qE '^missing[[:space:]]+fish[[:space:]]' "$TMP_ROOT/fish-global-missing.out"
 "$TMP_REPO/bin/dotlink" link fish > /dev/null
+"$TMP_REPO/bin/dotlink" link agents > /dev/null
 
 if ! "$TMP_REPO/bin/dotlink" verify > "$TMP_ROOT/opt-absent-verify.out" 2>&1; then
     printf 'FAIL: verify must pass when an optional module is absent\n' >&2

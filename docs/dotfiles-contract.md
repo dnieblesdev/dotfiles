@@ -35,12 +35,83 @@ There is no compatibility shim and no preservation guarantee for the removed ins
 - Optional modules that do not apply to the current platform are reported as `skip` and do
   not fail `verify`; a linked-but-broken optional module still reports drift or conflict.
 - `unlink` removes only repository-owned symlinks.
-- `link` rolls back only symlinks created during the failed operation.
+- `link` continues after individual failures and retains successful links. It cleans only incomplete changes created for the failed entry, never earlier successes.
 - Profiles are restricted shell-data manifests, not executable provisioning scripts.
 - Platform-specific Git settings live in a separate module and are reached through a
   Git `[include]`, never by making the common config machine-aware. The common
   `git/.gitconfig` stays portable: no machine paths, no absolute interpreter paths,
   and no Windows-only `core` keys.
+
+## Best-effort linking
+
+`link` attempts every safe selected entry in deterministic order, in legacy and
+explicit modes alike. A conflict or failed source/parent/link operation is reported
+and does not stop later entries. Existing foreign data is never changed. Earlier
+and later successes remain linked; cleanup removes only incomplete artifacts
+created for the failed entry. A malformed configuration or an ambiguous selected
+plan (duplicate or nested targets) is rejected before any writes.
+
+Every executed link run ends with `dotlink: summary: created=N unchanged=N failed=N`.
+Exit 0 means every entry succeeded or was already linked; exit 1 means at least
+one entry failed. With `--report=json`, stdout contains only the JSON document;
+progress, errors and the summary go to stderr. Ordered report entries identify
+every success and failure; the top-level failure identifies the first failed
+entry. The existing `rollback` metadata describes failed-entry cleanup only,
+not undoing successful entries. If a base cannot be resolved, the failed entry has
+an empty target and the top-level failure target is null; other safe entries still
+run, including entries in the same module. Other lifecycle commands do not gain
+summaries and retain their prior processing before a collection error.
+
+## Explicit module mappings
+
+`dotlink/modules.conf` is literal data, never executed. A missing, empty, or
+comment-only file leaves every module on legacy discovery; an omitted module
+also uses legacy discovery. A present invalid file is rejected, including errors
+in unselected modules: there is no fallback after an error.
+
+```ini
+[module agents]
+[link]
+source = skills
+target = .agents/skills
+```
+
+Each known `[module NAME]` appears at most once and contains one or more `[link]`
+blocks. Each block requires exactly one nonempty `source` and `target`; optional
+`base` is `home` or `xdg_config`, defaulting to `home` only when absent. Unknown
+or duplicate fields, properties outside links, malformed headers and empty modules
+are errors. `source` is relative to the module, `target` to its base. Absolute,
+empty, dot or dot-dot components, repeated slashes and trailing slashes are
+invalid. Sources must be real regular files or directories, with no symlink
+components. Target parents must be real directories, not symlinks.
+
+`home` uses `DOTLINK_HOME` (normally `HOME`). `xdg_config` uses a nonempty
+`XDG_CONFIG_HOME`, otherwise `DOTLINK_HOME/.config`. Selected bases must be
+absolute and contain no control bytes: the inventory transport uses tabs and
+newlines. This also rejects delimiter-ambiguous XDG roots in legacy Fish.
+XDG is validated only when selected. For explicit mappings, status/verify/unlink
+stop at an invalid source without repairing it; link reports it and continues.
+Duplicate or nested destinations
+across distinct selected mappings, whether explicit or legacy, are rejected before
+writes. Repeating a module argument or profile member is not a second mapping:
+link processes that module once, while list/status keep their historical selection
+output. Declaring duplicate destinations inside a module remains an error, and it
+is reported by the parser as `duplicate target` or `nested target` at the offending
+`target` line, so every command rejects it even when that module is unselected.
+
+Only blank lines and full-line `#` comments are ignored. Split properties at the
+first `=` and trim surrounding spaces and tabs; internal spaces, `#`, `$`, `*`
+and `=` are literal. There are no inline comments, quoting, escapes, multiline
+values, or variable, command, or glob expansions. Control bytes and NUL are
+invalid in values. LF, CRLF, and a final line without newline are supported.
+The configuration must be a readable real regular file, not a symlink or directory.
+
+`agents` is deliberately outside all profiles. Its only mapping links
+`agents/skills` to `~/.agents/skills`; `.gitkeep` is a marker, not a skill.
+Existing personal directories conflict and must be handled manually; dotlink
+never migrates them. Root `skills/` remains repository-only. Migrating legacy
+modules requires explicitly listing each desired entry and resolving conflicts;
+no existing module is migrated automatically.
 
 ## Fish: individual snippets
 

@@ -3,6 +3,8 @@
 *.swo
 *~
 .DS_Store
+__pycache__/
+*.pyc
 
 # No trackear el repo mismo
 repo/

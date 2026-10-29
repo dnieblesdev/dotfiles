@@ -59,12 +59,14 @@ The system MUST manage only symlinks that it can prove are repository-owned and 
 - THEN it reports the module as partial or drifted
 - AND it identifies conflicts without modifying paths
 
-#### Scenario: Partial failure rolls back owned changes
-- GIVEN dotlink creates one or more repository-owned symlinks during a link operation
-- AND a later destination in the same operation conflicts or fails
-- WHEN dotlink aborts the operation
-- THEN it removes only the symlinks it created during that operation
+#### Scenario: Partial failure preserves successes and continues
+- GIVEN a selected destination conflicts or fails during linking
+- WHEN dotlink processes the selected entries
+- THEN it reports the failed entry and attempts all later safe entries
+- AND it retains earlier and later successful links
+- AND it cleans only incomplete changes created for the failed entry
 - AND it leaves pre-existing repository-owned and non-owned paths unchanged
+- AND it prints created/unchanged/failed counts and exits 1 if any entry failed
 
 #### Scenario: Verify and status detect drift
 - GIVEN a previously linked destination no longer points at the intended repository target
