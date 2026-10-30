@@ -56,6 +56,13 @@ WSL and native Linux run on the common values alone.
 `agents/skills` to `~/.agents/skills`; existing personal directories conflict. The
 `.gitkeep` marker is not a skill. See `docs/dotfiles-contract.md` for mapping rules.
 
+Root `skills/` is **not** a dotlink module and is never linked. It holds
+repository-scoped skills that apply only while working in this repository, so they are
+read from their in-repo path. Do not move them into `agents/skills/` or add a mapping
+for them without deciding the scope change first: anything under `agents/skills/`
+becomes user-scoped and loads in every project. `bin/dotlink status skills` fails with
+`unknown module`, which is the expected answer, not a gap to fill.
+
 Note: `env/` is sourced by `.bashrc` and is **not** managed by dotlink (it contains non-hidden files).
 
 Quality gate (run before trusting changes):
