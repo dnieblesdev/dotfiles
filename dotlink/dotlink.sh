@@ -589,8 +589,9 @@ cmd_status() {
         [ -z "${seen_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
         [ "$state" != conflict ] || rc=1
-        # Attribute the orphan to its module so a declared-but-empty module that
-        # still owns stranded links is not reported as merely undiscovered.
+        # Attribute the orphan to its module: a module whose stranded link was
+        # just reported is not silently undiscovered, and it keeps the historical
+        # exit status that a legacy module with a deleted source already had.
         case "$src" in
             "$REPO_ROOT"/*)
                 module="${src#"$REPO_ROOT"/}"
@@ -598,6 +599,8 @@ cmd_status() {
                 reported_modules["$module"]=1
                 ;;
         esac
+        # An unclaimed link is stale by definition, however its referent resolves.
+        [ "$state" = conflict ] || state=drift
         printf '%s\t%s\t%s\n' "$state" "orphan" "$target"
     done < <(collect_orphaned_entries)
 
@@ -610,7 +613,6 @@ cmd_status() {
             rc=1
         fi
     done
-
     return "$rc"
 }
 
@@ -645,8 +647,9 @@ cmd_verify() {
                 fi
             fi
         done <<< "$entries"
-        # Verification of a module with nothing to check is not a pass.
-        if [ "$declared" -eq 0 ]; then
+        # Verification of a module with nothing to check is not a pass. An absent
+        # optional module is a platform skip, so it keeps the historical exemption.
+        if [ "$declared" -eq 0 ] && ! dotlink_is_optional_module "$module"; then
             warn "$REPO_ROOT/$module: no entries discovered; declare explicit mappings or add dot entries"
             rc=1
         fi

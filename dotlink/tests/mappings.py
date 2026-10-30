@@ -374,6 +374,10 @@ class MappingsTest(unittest.TestCase):
 class UnlinkReachabilityTest(MappingsTest):
     """unlink must remove repository-owned symlinks it can prove it owns (#31)."""
 
+    # MappingsTest carries the reusable fixture, not reusable tests to rerun here.
+    def runTest(self):
+        pass
+
     def test_unlink_removes_link_after_source_disappears(self):
         self.expect(("link", "agents"), out=self.linked(".agents/skills", "skills", "agents") + self.summary(1))
         target = self.home / ".agents/skills"
