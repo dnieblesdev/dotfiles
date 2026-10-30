@@ -290,12 +290,17 @@ if "$TMP_REPO/bin/dotlink" status --profile=base bash >"$TMP_ROOT/dotlink-profil
 fi
 grep -q 'cannot combine --profile with explicit modules' "$TMP_ROOT/dotlink-profile-equals-explicit.err"
 
-# Source deleted after linking is reported as drift by orphan detection.
+# Source deleted after linking is reported as drift by orphan detection, and the
+# module now resolves to no entry, which is not a healthy state.
 "$TMP_REPO/bin/dotlink" link bash
 rm "$TMP_REPO/bash/.bashrc"
-"$TMP_REPO/bin/dotlink" status bash >"$TMP_ROOT/dotlink-deleted-status.out" 2>"$TMP_ROOT/dotlink-deleted-status.err"
+if "$TMP_REPO/bin/dotlink" status bash >"$TMP_ROOT/dotlink-deleted-status.out" 2>"$TMP_ROOT/dotlink-deleted-status.err"; then
+    printf 'expected status failure for a module with no entry after source deletion\n' >&2
+    exit 1
+fi
 grep -q '^drift[[:space:]]' "$TMP_ROOT/dotlink-deleted-status.out"
 grep -q '.bashrc' "$TMP_ROOT/dotlink-deleted-status.out"
+grep -q 'no entries discovered' "$TMP_ROOT/dotlink-deleted-status.err"
 if "$TMP_REPO/bin/dotlink" verify bash >"$TMP_ROOT/dotlink-deleted-verify.out" 2>"$TMP_ROOT/dotlink-deleted-verify.err"; then
     printf 'expected verify failure after source deletion\n' >&2
     exit 1

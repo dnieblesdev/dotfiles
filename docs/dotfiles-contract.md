@@ -39,7 +39,9 @@ There is no compatibility shim and no preservation guarantee for the removed ins
   repository owns. A repository-owned symlink that no selected module accounts for is
   reported as `drift orphan` and removed by `unlink`.
 - `status` and `verify` do not report success for a selected known module that resolves to
-  no entry at all; they name the module and fail.
+  no entry at all; they name the module and fail. An orphaned link is reported, but it is
+  not an entry: a module whose only remaining artifact is a stranded link still fails, so a
+  deleted source can no longer pass as healthy.
 - `link` continues after individual failures and retains successful links. It cleans only incomplete changes created for the failed entry, never earlier successes.
 - Profiles are restricted shell-data manifests, not executable provisioning scripts.
 - Platform-specific Git settings live in a separate module and are reached through a

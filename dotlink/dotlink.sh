@@ -589,14 +589,13 @@ cmd_status() {
         [ -z "${seen_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
         [ "$state" != conflict ] || rc=1
-        # Attribute the orphan to its module: a module whose stranded link was
-        # just reported is not silently undiscovered, and it keeps the historical
-        # exit status that a legacy module with a deleted source already had.
+        # Attribute the orphan to its module. An orphan is not an entry: the
+        # module still resolves to nothing, so it must not be reported healthy.
         case "$src" in
             "$REPO_ROOT"/*)
                 module="${src#"$REPO_ROOT"/}"
                 module="${module%%/*}"
-                reported_modules["$module"]=1
+                reported_modules["$module"]=0
                 ;;
         esac
         # An unclaimed link is stale by definition, however its referent resolves.
