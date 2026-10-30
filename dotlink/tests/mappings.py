@@ -371,5 +371,85 @@ class MappingsTest(unittest.TestCase):
         self.assertFalse((self.home / "bad").exists())
 
 
+class UnlinkReachabilityTest(unittest.TestCase):
+    """unlink must remove repository-owned symlinks it can prove it owns (#31)."""
+
+    # Reuse the fixture without inheriting its tests, which unittest collects
+    # from any TestCase subclass.
+    setUp = MappingsTest.setUp
+    run_cli = MappingsTest.run_cli
+    expect = MappingsTest.expect
+    snapshot = MappingsTest.snapshot
+    mapping = MappingsTest.mapping
+    summary = staticmethod(MappingsTest.summary)
+    linked = MappingsTest.linked
+    assert_link = MappingsTest.assert_link
+
+    def test_unlink_removes_link_after_source_disappears(self):
+        self.expect(("link", "agents"), out=self.linked(".agents/skills", "skills", "agents") + self.summary(1))
+        target = self.home / ".agents/skills"
+        source = self.repo / "agents/skills"
+        shutil.move(str(source), str(self.root / "moved-skills"))
+        # Ownership, not source existence, authorizes removal.
+        self.expect(("unlink", "agents"), out=f"dotlink: unlinked {target}\n")
+        self.assertFalse(target.is_symlink())
+        self.assertFalse(target.exists())
+
+    def test_status_and_verify_fail_for_a_known_module_without_entries(self):
+        self.config.unlink(missing_ok=True)
+        for command in ("status", "verify"):
+            with self.subTest(command=command):
+                result = self.run_cli(command, "agents")
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(result.stderr,
+                                 f"dotlink: {self.repo}/agents: no entries discovered; declare explicit mappings or add dot entries\n")
+        # link and unlink keep their historical best-effort behaviour.
+        self.expect(("link", "agents"), out=self.summary())
+        self.expect(("list", "agents"), out="agents\n")
+        self.assertEqual(self.snapshot(), [])
+
+    def test_unlink_removes_repo_owned_link_the_selection_cannot_describe(self):
+        self.expect(("link", "agents"), out=self.linked(".agents/skills", "skills", "agents") + self.summary(1))
+        target = self.home / ".agents/skills"
+        # Dropping the declaration leaves a functional repository-owned link that
+        # legacy discovery cannot describe; it must still be removable.
+        self.config.unlink()
+        self.expect(("unlink", "agents"), out=f"dotlink: unlinked orphaned {target}\n")
+        self.assertFalse(target.is_symlink())
+        self.assertEqual((self.home / ".agents").is_dir(), (self.home / ".agents").exists())
+
+    def test_unlink_never_touches_foreign_links_or_files(self):
+        foreign_target = self.root / "foreign.txt"
+        foreign_target.write_text("keep")
+        foreign_link = self.home / ".agents/skills"
+        (self.home / ".agents").mkdir()
+        foreign_link.symlink_to(foreign_target)
+        plain_dir = self.home / ".plain"
+        plain_dir.mkdir()
+
+        def assert_untouched():
+            self.assertTrue(foreign_link.is_symlink())
+            self.assertEqual(os.readlink(foreign_link), str(foreign_target))
+            self.assertTrue(plain_dir.is_dir())
+            self.assertEqual(foreign_target.read_text(), "keep")
+
+        # Declared but foreign: refuse and report, never remove.
+        result = self.run_cli("unlink", "agents")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr,
+                         f"dotlink: conflict: refusing to unlink {foreign_link}\n")
+        assert_untouched()
+
+        # Undeclared: dotlink has no claim on this path and stays silent.
+        self.config.unlink()
+        for args in (("unlink", "agents"), ("unlink",)):
+            with self.subTest(args=args):
+                result = self.run_cli(*args)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                assert_untouched()
+
+
 if __name__ == "__main__":
     unittest.main()
