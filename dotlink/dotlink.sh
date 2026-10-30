@@ -35,6 +35,9 @@ Explicit mappings are declared as literal data in dotlink/modules.conf.
 link attempts all safe entries, retains successes, and exits 1 if any entry fails.
 It ends with summary: created=N unchanged=N failed=N (stderr in JSON mode).
 Only incomplete changes of a failed entry are cleaned up, never earlier successes.
+unlink removes repository-owned symlinks even if the source no longer exists,
+including ones no selected module describes (reported as drift orphan).
+status and verify fail for a selected known module that resolves to no entry.
 
 Dotlink manages repository-owned symlinks only. It never installs packages,
 runtimes, tools, or OS provisioning dependencies.
@@ -371,8 +374,9 @@ collect_orphaned_entries() {
             *)  resolved_target="$(dirname "$target")/$link_target" ;;
         esac
 
-        # Only report repo-owned broken symlinks.
-        [ -e "$resolved_target" ] && continue
+        # Report every repository-owned symlink here. Broken links are always
+        # orphaned; a functional one is orphaned only when no selected module
+        # accounts for its destination, which the caller filters by target.
         is_repo_path "$resolved_target" || continue
 
         printf '%s\t%s\n' "$resolved_target" "$target"
@@ -550,10 +554,11 @@ cmd_list() {
 
 cmd_status() {
     local modules=("$@")
-    local module src target cause message state entries rc=0
-    local -A seen_targets=()
+    local module src target cause message state entries rc=0 declared=0
+    local -A seen_targets=() reported_modules=()
 
     for module in "${modules[@]}"; do
+        declared=0
         entries="$(collect_module_entries "$module")" || return 1
         while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
@@ -571,34 +576,58 @@ cmd_status() {
                 state=skip
             fi
             [ "$state" != conflict ] || rc=1
+            declared=1
             printf '%s\t%s\t%s\n' "$state" "$module" "$target"
         done <<< "$entries"
+        reported_modules["$module"]=$declared
     done
 
-    # Surface orphaned repo-owned broken symlinks as drift.
+    # Surface repo-owned symlinks no selected module accounts for: broken ones
+    # always, functional ones only when their destination is unclaimed.
     while IFS=$'\t' read -r src target cause message; do
         [ -n "$target" ] || continue
         [ -z "${seen_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
         [ "$state" != conflict ] || rc=1
+        # Attribute the orphan to its module so a declared-but-empty module that
+        # still owns stranded links is not reported as merely undiscovered.
+        case "$src" in
+            "$REPO_ROOT"/*)
+                module="${src#"$REPO_ROOT"/}"
+                module="${module%%/*}"
+                reported_modules["$module"]=1
+                ;;
+        esac
         printf '%s\t%s\t%s\n' "$state" "orphan" "$target"
     done < <(collect_orphaned_entries)
+
+    # A known module that resolves to no entry at all cannot be reported as
+    # healthy. A module whose only output is orphan drift already surfaced its
+    # own problem and keeps its historical exit status.
+    for module in "${modules[@]}"; do
+        if [ "${reported_modules[$module]:-0}" -eq 0 ] && ! dotlink_is_optional_module "$module"; then
+            warn "$REPO_ROOT/$module: no entries discovered; declare explicit mappings or add dot entries"
+            rc=1
+        fi
+    done
 
     return "$rc"
 }
 
 cmd_verify() {
     local modules=("$@")
-    local module src target cause message state entries rc=0
+    local module src target cause message state entries rc=0 declared=0
     local -A seen_targets=()
 
     for module in "${modules[@]}"; do
+        declared=0
         entries="$(collect_module_entries "$module")" || return 1
         while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
             if [ -n "$cause" ]; then warn "$message"; return 1; fi
             if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then return 1; fi
             seen_targets["$target"]=1
+            declared=1
             if mapping_is_explicit "$module" && ! validate_fish_parent_dir "$target" 2>/dev/null; then
                 state=conflict
             else
@@ -616,6 +645,11 @@ cmd_verify() {
                 fi
             fi
         done <<< "$entries"
+        # Verification of a module with nothing to check is not a pass.
+        if [ "$declared" -eq 0 ]; then
+            warn "$REPO_ROOT/$module: no entries discovered; declare explicit mappings or add dot entries"
+            rc=1
+        fi
     done
 
     # Orphaned repo-owned broken symlinks fail verification.
@@ -642,7 +676,8 @@ cmd_unlink() {
         while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
             if [ -n "$cause" ]; then warn "$message"; return 1; fi
-            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then return 1; fi
+            # Ownership, not source existence, authorizes removal: a moved or
+            # deleted source must never strand a symlink this repository owns.
             seen_targets["$target"]=1
             if mapping_is_explicit "$module" && ! validate_fish_parent_dir "$target" 2>/dev/null; then
                 state=conflict
@@ -650,7 +685,9 @@ cmd_unlink() {
                 state="$(entry_state "$src" "$target")"
             fi
             case "$state" in
-                linked)
+                linked|drift)
+                    # drift still means this repository owns the symlink; only the
+                    # referent moved. Removal stays authorized.
                     rm "$target"
                     info "unlinked $target"
                     ;;

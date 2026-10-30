@@ -34,7 +34,12 @@ There is no compatibility shim and no preservation guarantee for the removed ins
 - `status` and `verify` are read-only drift detectors.
 - Optional modules that do not apply to the current platform are reported as `skip` and do
   not fail `verify`; a linked-but-broken optional module still reports drift or conflict.
-- `unlink` removes only repository-owned symlinks.
+- `unlink` removes only repository-owned symlinks. Removal is authorized by ownership,
+  not by the source still existing: a moved or deleted source never strands a link this
+  repository owns. A repository-owned symlink that no selected module accounts for is
+  reported as `drift orphan` and removed by `unlink`.
+- `status` and `verify` do not report success for a selected known module that resolves to
+  no entry at all; they name the module and fail.
 - `link` continues after individual failures and retains successful links. It cleans only incomplete changes created for the failed entry, never earlier successes.
 - Profiles are restricted shell-data manifests, not executable provisioning scripts.
 - Platform-specific Git settings live in a separate module and are reached through a

@@ -47,6 +47,25 @@ The system MUST manage only symlinks that it can prove are repository-owned and 
 - THEN dotlink refuses the operation with a conflict
 - AND it does not replace or remove the foreign symlink
 
+#### Scenario: Removal survives a missing source
+- GIVEN a repository-owned symlink was created for a module
+- AND the declared source was moved or deleted afterwards
+- WHEN the user runs dotlink unlink for that module
+- THEN dotlink removes the symlink and reports which path it removed
+- AND the missing source does not block removal, because ownership alone authorizes it
+
+#### Scenario: Undescribed repository-owned symlink stays reachable
+- GIVEN a repository-owned symlink exists whose destination no selected module accounts for
+- WHEN dotlink unlink or status runs
+- THEN dotlink reports it as `drift orphan` and unlink removes it
+- AND foreign paths are still never touched
+
+#### Scenario: A module with nothing to check is not reported as healthy
+- GIVEN a known module is selected but resolves to no entry at all
+- WHEN dotlink status or verify runs
+- THEN it names the module and fails
+- AND the read-only guarantee is preserved
+
 #### Scenario: Broken symlink is not assumed owned
 - GIVEN the desired destination is a broken symlink
 - WHEN dotlink evaluates ownership

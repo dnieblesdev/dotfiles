@@ -36,7 +36,8 @@ Rules you must respect:
 - Modules listed in `DOTLINK_OPTIONAL_MODULES` (currently `git-win`) are platform-specific.
   When an optional module is not linked, `status` reports `skip` and `verify` does not fail;
   a linked-but-broken optional module still reports `drift` or `conflict` and fails normally.
-- `unlink` removes **only** symlinks it can prove point into this repository. It will not touch foreign files.
+- `unlink` removes **only** symlinks it can prove point into this repository, and ownership alone authorizes removal: a moved or deleted source does not strand them. A repository-owned symlink no selected module accounts for is reported as `drift orphan` and removed.
+- `status` and `verify` fail for a selected known module that resolves to no entry at all, instead of reporting success.
 - `link` attempts every safe entry, preserves successes after individual failures, and exits 1 if any entry fails. Only incomplete changes for the failed entry are cleaned up; earlier successes are never rolled back.
 
 Profiles available:
