@@ -582,20 +582,34 @@ cmd_status() {
         reported_modules["$module"]=$declared
     done
 
+    # Every known module's declared targets, so an unselected sibling's link is
+    # never mistaken for an orphan of this selection.
+    local -A declared_targets=()
+    local other
+    while IFS= read -r other; do
+        [ -n "$other" ] || continue
+        while IFS=$'\t' read -r src target cause message; do
+            [ -n "$target" ] || continue
+            [ -n "$cause" ] && continue
+            declared_targets["$target"]=1
+        done <<< "$(collect_module_entries "$other")"
+    done < <(dotlink_list_known_modules "$REPO_ROOT")
+
     # Surface repo-owned symlinks no selected module accounts for: broken ones
     # always, functional ones only when their destination is unclaimed.
+    local -A orphan_modules=()
     while IFS=$'\t' read -r src target cause message; do
         [ -n "$target" ] || continue
         [ -z "${seen_targets[$target]:-}" ] || continue
+        [ -z "${declared_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
         [ "$state" != conflict ] || rc=1
-        # Attribute the orphan to its module. An orphan is not an entry: the
-        # module still resolves to nothing, so it must not be reported healthy.
+        # Attribute the orphan to its module in its own map: an orphan is not an
+        # entry, so it must never overwrite what the module actually declared.
         case "$src" in
             "$REPO_ROOT"/*)
                 module="${src#"$REPO_ROOT"/}"
-                module="${module%%/*}"
-                reported_modules["$module"]=0
+                orphan_modules["${module%%/*}"]=1
                 ;;
         esac
         # An unclaimed link is stale by definition, however its referent resolves.
@@ -607,10 +621,10 @@ cmd_status() {
     # healthy. A module whose only output is orphan drift already surfaced its
     # own problem and keeps its historical exit status.
     for module in "${modules[@]}"; do
-        if [ "${reported_modules[$module]:-0}" -eq 0 ] && ! dotlink_is_optional_module "$module"; then
-            warn "$REPO_ROOT/$module: no entries discovered; declare explicit mappings or add dot entries"
-            rc=1
-        fi
+        [ "${reported_modules[$module]:-0}" -eq 0 ] || continue
+        dotlink_is_optional_module "$module" && continue
+        warn "$REPO_ROOT/$module: no entries discovered; declare explicit mappings or add dot entries"
+        rc=1
     done
     return "$rc"
 }
@@ -654,10 +668,23 @@ cmd_verify() {
         fi
     done
 
-    # Orphaned repo-owned broken symlinks fail verification.
+    # Unclaimed repo-owned symlinks fail verification; a sibling module's link is
+    # claimed and therefore not an orphan of this selection.
+    local -A declared_targets=()
+    local other
+    while IFS= read -r other; do
+        [ -n "$other" ] || continue
+        while IFS=$'\t' read -r src target cause message; do
+            [ -n "$target" ] || continue
+            [ -n "$cause" ] && continue
+            declared_targets["$target"]=1
+        done <<< "$(collect_module_entries "$other")"
+    done < <(dotlink_list_known_modules "$REPO_ROOT")
+
     while IFS=$'\t' read -r src target cause message; do
         [ -n "$target" ] || continue
         [ -z "${seen_targets[$target]:-}" ] || continue
+        [ -z "${declared_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
         if [ "$state" != linked ]; then
             rc=1
@@ -702,10 +729,24 @@ cmd_unlink() {
         done <<< "$entries"
     done
 
-    # Remove orphaned repo-owned broken symlinks.
+    # Remove repo-owned symlinks that no selected module describes. Every other
+    # module's declared targets must be treated as claimed, or unlinking one
+    # module would delete its siblings' links.
+    local -A declared_targets=()
+    local other
+    while IFS= read -r other; do
+        [ -n "$other" ] || continue
+        while IFS=$'\t' read -r src target cause message; do
+            [ -n "$target" ] || continue
+            [ -n "$cause" ] && continue
+            declared_targets["$target"]=1
+        done <<< "$(collect_module_entries "$other")"
+    done < <(dotlink_list_known_modules "$REPO_ROOT")
+
     while IFS=$'\t' read -r src target cause message; do
         [ -n "$target" ] || continue
         [ -z "${seen_targets[$target]:-}" ] || continue
+        [ -z "${declared_targets[$target]:-}" ] || continue
         state="$(entry_state "$src" "$target")"
         case "$state" in
             linked|drift)

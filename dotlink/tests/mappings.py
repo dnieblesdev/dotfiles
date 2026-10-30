@@ -371,12 +371,19 @@ class MappingsTest(unittest.TestCase):
         self.assertFalse((self.home / "bad").exists())
 
 
-class UnlinkReachabilityTest(MappingsTest):
+class UnlinkReachabilityTest(unittest.TestCase):
     """unlink must remove repository-owned symlinks it can prove it owns (#31)."""
 
-    # MappingsTest carries the reusable fixture, not reusable tests to rerun here.
-    def runTest(self):
-        pass
+    # Reuse the fixture without inheriting its tests, which unittest collects
+    # from any TestCase subclass.
+    setUp = MappingsTest.setUp
+    run_cli = MappingsTest.run_cli
+    expect = MappingsTest.expect
+    snapshot = MappingsTest.snapshot
+    mapping = MappingsTest.mapping
+    summary = staticmethod(MappingsTest.summary)
+    linked = MappingsTest.linked
+    assert_link = MappingsTest.assert_link
 
     def test_unlink_removes_link_after_source_disappears(self):
         self.expect(("link", "agents"), out=self.linked(".agents/skills", "skills", "agents") + self.summary(1))
