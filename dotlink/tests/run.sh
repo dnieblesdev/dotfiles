@@ -52,6 +52,19 @@ grep -q '^linked' "$TMP_ROOT/status.out"
 "$TMP_REPO/bin/dotlink" unlink --profile base
 assert_missing "$DOTLINK_HOME/.bashrc"
 
+# These report fixtures exercise legacy discovery of arbitrary filenames.
+# Remove the explicit Bash mapping only in the disposable repository copy.
+cp "$TMP_REPO/dotlink/modules.conf" "$TMP_ROOT/modules.conf"
+python3 - "$TMP_REPO/dotlink/modules.conf" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+block = "[module bash]\n[link]\nsource = .bashrc\ntarget = .bashrc\n\n"
+assert text.count(block) == 1
+path.write_text(text.replace(block, ""))
+PY
+
 # Structured report: ordered results, JSON-only stdout, and shell-sensitive names.
 printf 'quoted fixture\n' > "$TMP_REPO/bash/.quoted\"name"
 "$TMP_REPO/bin/dotlink" link --report=json --profile base >"$TMP_ROOT/report-success.json" 2>"$TMP_ROOT/report-success.err"
@@ -102,6 +115,7 @@ assert "\x01" in entry["source"]
 PY
 "$TMP_REPO/bin/dotlink" unlink bash
 rm "$TMP_REPO/bash/$control_filename"
+cp "$TMP_ROOT/modules.conf" "$TMP_REPO/dotlink/modules.conf"
 
 # Nested config entry link/unlink coverage.
 "$TMP_REPO/bin/dotlink" link config
@@ -290,24 +304,28 @@ if "$TMP_REPO/bin/dotlink" status --profile=base bash >"$TMP_ROOT/dotlink-profil
 fi
 grep -q 'cannot combine --profile with explicit modules' "$TMP_ROOT/dotlink-profile-equals-explicit.err"
 
-# Source deleted after linking is reported as drift by orphan detection, and the
-# module now resolves to no entry, which is not a healthy state.
+# A missing explicitly mapped source leaves an owned broken link reported as
+# an orphan, while the invalid source is diagnosed for both read-only commands.
 "$TMP_REPO/bin/dotlink" link bash
 rm "$TMP_REPO/bash/.bashrc"
 if "$TMP_REPO/bin/dotlink" status bash >"$TMP_ROOT/dotlink-deleted-status.out" 2>"$TMP_ROOT/dotlink-deleted-status.err"; then
     printf 'expected status failure for a module with no entry after source deletion\n' >&2
     exit 1
 fi
-grep -q '^drift[[:space:]]' "$TMP_ROOT/dotlink-deleted-status.out"
-grep -q '.bashrc' "$TMP_ROOT/dotlink-deleted-status.out"
-grep -q 'no entries discovered' "$TMP_ROOT/dotlink-deleted-status.err"
+printf 'drift\torphan\t%s/.bashrc\n' "$DOTLINK_HOME" > "$TMP_ROOT/deleted-expected.out"
+printf 'dotlink: %s/dotlink/modules.conf:3: bash: invalid source\n' "$TMP_REPO" > "$TMP_ROOT/deleted-expected.err"
+cmp "$TMP_ROOT/deleted-expected.out" "$TMP_ROOT/dotlink-deleted-status.out"
+cmp "$TMP_ROOT/deleted-expected.err" "$TMP_ROOT/dotlink-deleted-status.err"
+assert_link "$DOTLINK_HOME/.bashrc" "$TMP_REPO/bash/.bashrc"
 if "$TMP_REPO/bin/dotlink" verify bash >"$TMP_ROOT/dotlink-deleted-verify.out" 2>"$TMP_ROOT/dotlink-deleted-verify.err"; then
     printf 'expected verify failure after source deletion\n' >&2
     exit 1
 fi
-grep -q '^drift[[:space:]]' "$TMP_ROOT/dotlink-deleted-verify.out"
-grep -q '.bashrc' "$TMP_ROOT/dotlink-deleted-verify.out"
-rm "$DOTLINK_HOME/.bashrc"
+cmp "$TMP_ROOT/deleted-expected.out" "$TMP_ROOT/dotlink-deleted-verify.out"
+cmp "$TMP_ROOT/deleted-expected.err" "$TMP_ROOT/dotlink-deleted-verify.err"
+assert_link "$DOTLINK_HOME/.bashrc" "$TMP_REPO/bash/.bashrc"
+"$TMP_REPO/bin/dotlink" unlink bash
+assert_missing "$DOTLINK_HOME/.bashrc"
 
 # real_path fallback chain: readlink-only and pure-shell fallbacks.
 STUB_DIR="$TMP_ROOT/stubs"
