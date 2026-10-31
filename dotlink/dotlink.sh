@@ -552,6 +552,19 @@ cmd_list() {
     done
 }
 
+# A failed declaration cannot hide an existing broken owned link or conflict.
+report_invalid_source_target() {
+    local target="$1" state
+    if ! validate_fish_parent_dir "$target" 2>/dev/null; then
+        printf 'conflict\t%s\t%s\n' "$2" "$target"
+    elif [ -L "$target" ] && [ ! -e "$target" ] && is_owned_symlink "$target"; then
+        printf 'drift\torphan\t%s\n' "$target"
+    elif [ -e "$target" ] || [ -L "$target" ]; then
+        state="$(entry_state "$3" "$target")"
+        [ "$state" != conflict ] || printf 'conflict\t%s\t%s\n' "$2" "$target"
+    fi
+}
+
 cmd_status() {
     local modules=("$@")
     local module src target cause message state entries rc=0 declared=0
@@ -563,7 +576,10 @@ cmd_status() {
         while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
             if [ -n "$cause" ]; then warn "$message"; return 1; fi
-            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then return 1; fi
+            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then
+                report_invalid_source_target "$target" "$module" "$src"
+                return 1
+            fi
             seen_targets["$target"]=1
             if mapping_is_explicit "$module" && ! validate_fish_parent_dir "$target" 2>/dev/null; then
                 state=conflict
@@ -640,7 +656,10 @@ cmd_verify() {
         while IFS=$'\t' read -r src target cause message; do
             [ -n "$src" ] || continue
             if [ -n "$cause" ]; then warn "$message"; return 1; fi
-            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then return 1; fi
+            if mapping_is_explicit "$module" && ! mapping_check_source "$module" "$src"; then
+                report_invalid_source_target "$target" "$module" "$src"
+                return 1
+            fi
             seen_targets["$target"]=1
             declared=1
             if mapping_is_explicit "$module" && ! validate_fish_parent_dir "$target" 2>/dev/null; then

@@ -96,8 +96,11 @@ components. Target parents must be real directories, not symlinks.
 `XDG_CONFIG_HOME`, otherwise `DOTLINK_HOME/.config`. Selected bases must be
 absolute and contain no control bytes: the inventory transport uses tabs and
 newlines. This also rejects delimiter-ambiguous XDG roots in legacy Fish.
-XDG is validated only when selected. For explicit mappings, status/verify/unlink
-stop at an invalid source without repairing it; link reports it and continues.
+XDG is validated only when selected. For explicit mappings, status and verify
+stop at an invalid source without repairing it, report the source error, and report
+an existing broken repository-owned destination as `drift orphan` or a conflicting
+destination as `conflict`. Unlink relies on ownership even if the source is gone;
+link reports an invalid source and continues.
 Duplicate or nested destinations
 across distinct selected mappings, whether explicit or legacy, are rejected before
 writes. Repeating a module argument or profile member is not a second mapping:
