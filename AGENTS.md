@@ -29,6 +29,16 @@ bin/dotlink unlink [--profile NAME] | MODULE...
 bin/dotlink verify [--profile NAME] | MODULE...
 ```
 
+### Mapping declarations versus filesystem state
+
+`dotlink/modules.conf` declares intended source-to-destination mappings for dotlink
+and is where new explicit mappings are added. It is not a record of current link
+state: a declaration does not prove that a source or destination exists, that a
+link is healthy, or that it belongs to this repository. Likewise, an absent
+declaration alone does not establish the state of a path in HOME. Determine
+actual state and ownership from the filesystem, including the link and its target;
+continue to apply dotlink's conflict and ownership safety rules.
+
 Rules you must respect:
 
 - `--profile NAME` and explicit `MODULE...` arguments are **mutually exclusive**. Never combine them.

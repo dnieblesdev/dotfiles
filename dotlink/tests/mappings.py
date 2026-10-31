@@ -62,6 +62,37 @@ class MappingsTest(unittest.TestCase):
         self.assertTrue(target.is_symlink(), str(target))
         self.assertEqual(os.readlink(target), str(self.repo / module / source))
 
+    def test_bash_mapping_matches_legacy_lifecycle(self):
+        original = self.config.read_text()
+        self.assertIn("[module bash]", original)
+        results = []
+        for config in ("", original):
+            self.config.write_text(config)
+            run = []
+            for args in (("status", "bash"), ("verify", "bash"), ("link", "bash"),
+                         ("link", "bash"), ("status", "bash"), ("verify", "bash"),
+                         ("unlink", "bash")):
+                result = self.run_cli(*args)
+                run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+            results.append(run)
+        self.assertEqual(results[0], results[1])
+
+    def test_new_bash_dotfile_requires_explicit_mapping(self):
+        (self.repo / "bash/.new-dotfile").write_text("fixture")
+        target = self.home / ".new-dotfile"
+        self.expect(("link", "bash"), out=self.linked(".bashrc") + self.summary(1))
+        self.assertFalse(target.exists())
+        self.expect(("status", "bash"), out=f"linked\tbash\t{self.home / '.bashrc'}\n")
+        self.expect(("verify", "bash"))
+        self.expect(("unlink", "bash"), out=f"dotlink: unlinked {self.home / '.bashrc'}\n")
+        self.mapping([".bashrc", ".new-dotfile"], [".bashrc", ".new-dotfile"])
+        self.expect(("link", "bash"), out=self.linked(".bashrc") + self.linked(".new-dotfile", ".new-dotfile") + self.summary(2))
+        self.assert_link(".new-dotfile", ".new-dotfile")
+        self.expect(("status", "bash"), out=f"linked\tbash\t{self.home / '.bashrc'}\nlinked\tbash\t{target}\n")
+        self.expect(("verify", "bash"))
+        self.expect(("unlink", "bash"), out=f"dotlink: unlinked {self.home / '.bashrc'}\ndotlink: unlinked {target}\n")
+        self.assertEqual(self.snapshot(), [])
+
     def test_agents_full_lifecycle_and_profiles(self):
         parent = self.home / ".agents"
         parent.mkdir()

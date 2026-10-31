@@ -119,9 +119,10 @@ The configuration must be a readable real regular file, not a symlink or directo
 `agents` is deliberately outside all profiles. Its only mapping links
 `agents/skills` to `~/.agents/skills`; `.gitkeep` is a marker, not a skill.
 Existing personal directories conflict and must be handled manually; dotlink
-never migrates them. Root `skills/` remains repository-only. Migrating legacy
-modules requires explicitly listing each desired entry and resolving conflicts;
-no existing module is migrated automatically.
+never migrates them. Root `skills/` remains repository-only. The `bash` module
+explicitly maps `bash/.bashrc` to `~/.bashrc`; additional Bash destinations
+require their own mappings. Other legacy modules continue using discovery until
+explicitly migrated.
 
 ## Fish: individual snippets
 
