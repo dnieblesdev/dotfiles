@@ -385,6 +385,36 @@ class UnlinkReachabilityTest(unittest.TestCase):
     linked = MappingsTest.linked
     assert_link = MappingsTest.assert_link
 
+    def test_status_verify_deleted_explicit_source_report_owned_orphan(self):
+        self.mapping([".bashrc"])
+        self.expect(("link", "bash"), out=self.linked(".bashrc") + self.summary(1))
+        source = self.repo / "bash/.bashrc"
+        source.rename(self.root / "moved-bashrc")
+        before = self.snapshot()
+        for command in ("status", "verify"):
+            with self.subTest(command=command):
+                self.expect((command, "bash"), 1,
+                            f"drift\torphan\t{self.home / '.bashrc'}\n",
+                            f"dotlink: {self.config}:2: bash: invalid source\n")
+                self.assertEqual(self.snapshot(), before)
+
+    def test_invalid_explicit_source_preserves_conflicts(self):
+        self.mapping([".bashrc"], ["absent"])
+        target = self.home / ".bashrc"
+        for kind in ("file", "foreign-link"):
+            with self.subTest(kind=kind):
+                if kind == "file":
+                    target.write_text("foreign")
+                else:
+                    target.symlink_to(self.root / "missing")
+                before = self.snapshot()
+                for command in ("status", "verify"):
+                    self.expect((command, "bash"), 1,
+                                f"conflict\tbash\t{target}\n",
+                                f"dotlink: {self.config}:2: bash: invalid source\n")
+                    self.assertEqual(self.snapshot(), before)
+                target.unlink()
+
     def test_unlink_removes_link_after_source_disappears(self):
         self.expect(("link", "agents"), out=self.linked(".agents/skills", "skills", "agents") + self.summary(1))
         target = self.home / ".agents/skills"
