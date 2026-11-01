@@ -62,6 +62,55 @@ class MappingsTest(unittest.TestCase):
         self.assertTrue(target.is_symlink(), str(target))
         self.assertEqual(os.readlink(target), str(self.repo / module / source))
 
+    def test_fish_mapping_matches_legacy_lifecycle(self):
+        original = self.config.read_text()
+        self.assertIn("[module fish]\n[link]\nsource = .config/fish/conf.d/dotfiles.fish\ntarget = fish/conf.d/dotfiles.fish\nbase = xdg_config\n", original)
+        for xdg in (None, "", str(self.root / "external xdg")):
+            with self.subTest(xdg=xdg):
+                if xdg is None:
+                    self.env.pop("XDG_CONFIG_HOME", None)
+                else:
+                    self.env["XDG_CONFIG_HOME"] = xdg
+                base = Path(xdg) if xdg else self.home / ".config"
+                runs = []
+                for config in ("", original):
+                    self.config.write_text(config)
+                    run = []
+                    for command in ("list", "status", "verify", "link", "link", "status", "verify", "unlink"):
+                        result = self.run_cli(command, "fish")
+                        run.append((result.returncode, result.stdout, result.stderr,
+                                    self.snapshot(), self.snapshot(base)))
+                    runs.append(run)
+                    shutil.rmtree(base, ignore_errors=True)
+                self.assertEqual(runs[0], runs[1])
+
+    def test_new_fish_snippet_requires_explicit_mapping(self):
+        snippet = self.repo / "fish/.config/fish/conf.d/new.fish"
+        snippet.write_text("# fixture\n")
+        result = self.run_cli("link", "fish")
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(result.stdout, self.linked(".config/fish/conf.d/dotfiles.fish",
+                         ".config/fish/conf.d/dotfiles.fish", "fish") + self.summary(1))
+        self.assertFalse((self.home / ".config/fish/conf.d/new.fish").exists())
+        self.assert_link(".config/fish/conf.d/dotfiles.fish", ".config/fish/conf.d/dotfiles.fish", "fish")
+        self.assertEqual(self.run_cli("verify", "fish").returncode, 0)
+
+    def test_new_fish_snippet_is_discovered_in_legacy_mode(self):
+        original = self.config.read_text()
+        start = original.index("[module fish]\n")
+        end = original.find("[module ", start + 1)
+        self.config.write_text(original[:start] + (original[end:] if end != -1 else ""))
+        (self.repo / "fish/.config/fish/conf.d/new.fish").write_text("# fixture\n")
+        first = self.home / ".config/fish/conf.d/dotfiles.fish"
+        second = self.home / ".config/fish/conf.d/new.fish"
+        self.expect(("link", "fish"), out=self.linked(".config/fish/conf.d/dotfiles.fish", ".config/fish/conf.d/dotfiles.fish", "fish") + self.linked(".config/fish/conf.d/new.fish", ".config/fish/conf.d/new.fish", "fish") + self.summary(2))
+        self.assert_link(".config/fish/conf.d/new.fish", ".config/fish/conf.d/new.fish", "fish")
+        self.expect(("status", "fish"), out=f"linked\tfish\t{first}\nlinked\tfish\t{second}\n")
+        self.expect(("verify", "fish"))
+        self.expect(("unlink", "fish"), out=f"dotlink: unlinked {first}\ndotlink: unlinked {second}\n")
+        self.assertFalse(first.is_symlink())
+        self.assertFalse(second.is_symlink())
+
     def test_bash_mapping_matches_legacy_lifecycle(self):
         original = self.config.read_text()
         self.assertIn("[module bash]", original)
