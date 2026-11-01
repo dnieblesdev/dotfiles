@@ -100,6 +100,56 @@ class MappingsTest(unittest.TestCase):
             runs.append(run)
         self.assertEqual(runs[0], runs[1])
         self.assertFalse((self.root / "custom-xdg").exists())
+    def test_git_mappings_match_legacy_lifecycle_and_conflicts(self):
+        original = self.config.read_text()
+        for module, target in (("git", ".gitconfig"), ("git-win", ".gitconfig.win")):
+            with self.subTest(module=module):
+                self.assertIn(f"[module {module}]\n[link]\nsource = {target}\ntarget = {target}\n", original)
+                runs = []
+                for config in ("", original):
+                    self.config.write_text(config)
+                    run = []
+                    for args in (("status", module), ("verify", module), ("link", module),
+                                 ("link", module), ("status", module), ("verify", module),
+                                 ("unlink", module)):
+                        result = self.run_cli(*args)
+                        run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+                    (self.home / target).write_text("foreign")
+                    for command in ("link", "status", "verify", "unlink"):
+                        result = self.run_cli(command, module)
+                        run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+                    (self.home / target).unlink()
+                    runs.append(run)
+                self.assertEqual(runs[0], runs[1])
+    def test_zsh_mapping_matches_legacy_lifecycle(self):
+        original = self.config.read_text()
+        self.assertIn("[module zsh]", original)
+        results = []
+        for config in ("", original):
+            self.config.write_text(config)
+            run = []
+            for args in (("status", "zsh"), ("verify", "zsh"), ("link", "zsh"),
+                         ("link", "zsh"), ("status", "zsh"), ("verify", "zsh"),
+                         ("unlink", "zsh")):
+                result = self.run_cli(*args)
+                run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+            results.append(run)
+        self.assertEqual(results[0], results[1])
+
+    def test_zsh_mapping_matches_legacy_conflict(self):
+        original = self.config.read_text()
+        results = []
+        target = self.home / ".zshrc"
+        target.write_text("personal configuration")
+        for config in ("", original):
+            self.config.write_text(config)
+            run = []
+            for command in ("link", "status", "verify", "unlink"):
+                result = self.run_cli(command, "zsh")
+                run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+            results.append(run)
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(target.read_text(), "personal configuration")
 
     def test_new_bash_dotfile_requires_explicit_mapping(self):
         (self.repo / "bash/.new-dotfile").write_text("fixture")
