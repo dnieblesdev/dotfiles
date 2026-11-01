@@ -77,6 +77,30 @@ class MappingsTest(unittest.TestCase):
             results.append(run)
         self.assertEqual(results[0], results[1])
 
+    def test_config_mapping_matches_legacy_lifecycle_and_conflicts(self):
+        original = self.config.read_text()
+        self.assertIn("[module config]\n[link]\nsource = .config/starship.toml\ntarget = .config/starship.toml\n", original)
+        self.env["XDG_CONFIG_HOME"] = str(self.root / "custom-xdg")
+        runs = []
+        for config in ("", original):
+            self.config.write_text(config)
+            run = []
+            for args in (("list", "config"), ("status", "config"), ("verify", "config"),
+                         ("link", "config"), ("link", "config"), ("status", "config"),
+                         ("verify", "config"), ("unlink", "config")):
+                result = self.run_cli(*args)
+                run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+            target = self.home / ".config/starship.toml"
+            target.write_text("foreign")
+            for command in ("link", "status", "verify", "unlink"):
+                result = self.run_cli(command, "config")
+                run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+            target.unlink()
+            target.parent.rmdir()
+            runs.append(run)
+        self.assertEqual(runs[0], runs[1])
+        self.assertFalse((self.root / "custom-xdg").exists())
+
     def test_new_bash_dotfile_requires_explicit_mapping(self):
         (self.repo / "bash/.new-dotfile").write_text("fixture")
         target = self.home / ".new-dotfile"

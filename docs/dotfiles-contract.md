@@ -121,8 +121,10 @@ The configuration must be a readable real regular file, not a symlink or directo
 Existing personal directories conflict and must be handled manually; dotlink
 never migrates them. Root `skills/` remains repository-only. The `bash` module
 explicitly maps `bash/.bashrc` to `~/.bashrc`; additional Bash destinations
-require their own mappings. Other legacy modules continue using discovery until
-explicitly migrated.
+require their own mappings. The `config` module explicitly maps
+`config/.config/starship.toml` to `~/.config/starship.toml`, independent of
+`XDG_CONFIG_HOME`, as before. Other legacy modules continue using discovery
+until explicitly migrated.
 
 ## Fish: individual snippets
 
