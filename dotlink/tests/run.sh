@@ -251,6 +251,18 @@ if "$TMP_REPO/bin/dotlink" verify git >"$TMP_ROOT/dotlink-partial-verify.out" 2>
 fi
 grep -q '^missing[[:space:]]\+git[[:space:]]' "$TMP_ROOT/dotlink-partial-verify.out"
 
+# Add explicit fixture mappings in the disposable copy, before Starship.
+cp "$TMP_REPO/dotlink/modules.conf" "$TMP_ROOT/config-fixture-modules.conf"
+python3 - "$TMP_REPO/dotlink/modules.conf" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+anchor = "[module config]\n"
+assert text.count(anchor) == 1
+entries = "".join(f"[link]\nsource = .config/{name}\ntarget = .config/{name}\n" for name in ("dotlink-test-a", "dotlink-test-b"))
+path.write_text(text.replace(anchor, anchor + entries))
+PY
 printf 'one\n' > "$ROLLBACK_A"
 printf 'two\n' > "$ROLLBACK_B"
 mkdir -p "$DOTLINK_HOME/.config"
@@ -277,6 +289,7 @@ assert_link "$DOTLINK_HOME/.config/dotlink-test-a" "$ROLLBACK_A"
 assert_link "$DOTLINK_HOME/.config/starship.toml" "$TMP_REPO/config/.config/starship.toml"
 [ -f "$DOTLINK_HOME/.config/dotlink-test-b" ] || { printf 'rollback conflict file was removed\n' >&2; exit 1; }
 grep -q 'local conflict' "$DOTLINK_HOME/.config/dotlink-test-b"
+cp "$TMP_ROOT/config-fixture-modules.conf" "$TMP_REPO/dotlink/modules.conf"
 
 # Profile path traversal rejection.
 for bad_profile in '../base' 'foo/bar' '.hidden'; do
