@@ -86,7 +86,10 @@ from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 block = '[link]\nsource = .config/fish/conf.d/zz-conflict.fish\ntarget = fish/conf.d/zz-conflict.fish\nbase = xdg_config\n\n'
-path.write_text(path.read_text().replace('[module agents]', block + '[module agents]'))
+text = path.read_text()
+anchor = '[module fish]\n'
+assert text.count(anchor) == 1
+path.write_text(text.replace(anchor, anchor + block))
 PYTEST
 fi
 printf '# second\n' > "${SRC%/*}/zz-conflict.fish"

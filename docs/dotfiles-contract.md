@@ -119,18 +119,21 @@ The configuration must be a readable real regular file, not a symlink or directo
 `agents` is deliberately outside all profiles. Its only mapping links
 `agents/skills` to `~/.agents/skills`; `.gitkeep` is a marker, not a skill.
 Existing personal directories conflict and must be handled manually; dotlink
-never migrates them. Root `skills/` remains repository-only. The `bash` module
-explicitly maps `bash/.bashrc` to `~/.bashrc`; additional Bash destinations
-require their own mappings. The `config` module explicitly maps
-`config/.config/starship.toml` to `~/.config/starship.toml`, independent of
-`XDG_CONFIG_HOME`, as before. Other legacy modules continue using discovery
-until explicitly migrated.
-require their own mappings. The `git` and `git-win` modules explicitly map
-`git/.gitconfig` to `~/.gitconfig` and `git-win/.gitconfig.win` to
-`~/.gitconfig.win`, respectively. Additional destinations require mappings.
-explicitly maps `bash/.bashrc` to `~/.bashrc`, and `zsh` maps `zsh/.zshrc`
-to `~/.zshrc`; additional Bash or Zsh destinations require their own mappings.
-Other legacy modules continue using discovery until explicitly migrated.
+never migrates them. Root `skills/` remains repository-only.
+
+The manifest declares these HOME-based mappings:
+
+| Module | Source | Destination |
+|--------|--------|-------------|
+| `bash` | `bash/.bashrc` | `~/.bashrc` |
+| `zsh` | `zsh/.zshrc` | `~/.zshrc` |
+| `git` | `git/.gitconfig` | `~/.gitconfig` |
+| `git-win` | `git-win/.gitconfig.win` | `~/.gitconfig.win` |
+| `config` | `config/.config/starship.toml` | `~/.config/starship.toml` |
+
+Additional destinations require their own mappings. The `config` destination
+remains independent of `XDG_CONFIG_HOME`, as before. Modules omitted from the
+manifest continue using legacy discovery.
 
 ## Fish: individual snippets
 
