@@ -77,6 +77,28 @@ class MappingsTest(unittest.TestCase):
             results.append(run)
         self.assertEqual(results[0], results[1])
 
+    def test_git_mappings_match_legacy_lifecycle_and_conflicts(self):
+        original = self.config.read_text()
+        for module, target in (("git", ".gitconfig"), ("git-win", ".gitconfig.win")):
+            with self.subTest(module=module):
+                self.assertIn(f"[module {module}]\n[link]\nsource = {target}\ntarget = {target}\n", original)
+                runs = []
+                for config in ("", original):
+                    self.config.write_text(config)
+                    run = []
+                    for args in (("status", module), ("verify", module), ("link", module),
+                                 ("link", module), ("status", module), ("verify", module),
+                                 ("unlink", module)):
+                        result = self.run_cli(*args)
+                        run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+                    (self.home / target).write_text("foreign")
+                    for command in ("link", "status", "verify", "unlink"):
+                        result = self.run_cli(command, module)
+                        run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+                    (self.home / target).unlink()
+                    runs.append(run)
+                self.assertEqual(runs[0], runs[1])
+
     def test_new_bash_dotfile_requires_explicit_mapping(self):
         (self.repo / "bash/.new-dotfile").write_text("fixture")
         target = self.home / ".new-dotfile"
