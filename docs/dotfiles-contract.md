@@ -134,8 +134,15 @@ Other legacy modules continue using discovery until explicitly migrated.
 
 ## Fish: individual snippets
 
-The `fish` module links only regular `*.fish` files directly inside
-`fish/.config/fish/conf.d/` to `$XDG_CONFIG_HOME/fish/conf.d/`.
+The `fish` module explicitly maps `fish/.config/fish/conf.d/dotfiles.fish`
+to `$XDG_CONFIG_HOME/fish/conf.d/dotfiles.fish` in `dotlink/modules.conf`,
+using `base = xdg_config`. Each new snippet requires its own `[link]` entry;
+adding a `*.fish` file no longer discovers it automatically. If the Fish module
+is omitted from the manifest, legacy discovery automatically selects snippets.
+Both modes support the lifecycle, but validation diagnostics can differ: for
+example, a relative XDG root reports a mapping-base error in explicit mode and
+an XDG_CONFIG_HOME error in legacy mode. Links remain individual files, never
+the shared `conf.d` directory.
 An empty or unset `XDG_CONFIG_HOME` falls back to `$DOTLINK_HOME/.config`
 (`$HOME/.config` normally); a relative value is rejected. Before linking Fish,
 `dotlink` checks every existing component from `/` through `fish/conf.d` and

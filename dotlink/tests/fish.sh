@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+if [ -z "${FISH_MAPPING_TEST_MODE:-}" ]; then
+    for mode in explicit legacy; do
+        printf 'fish mapping mode: %s\n' "$mode"
+        FISH_MAPPING_TEST_MODE="$mode" bash "$0"
+    done
+    bash "$ROOT/dotlink/tests/fish-mise.sh"
+    printf 'fish tests passed\n'
+    exit 0
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/repo" "$TMP/home"
 (cd "$ROOT" && tar --exclude='./.git' -cf - .) | (cd "$TMP/repo" && tar -xf -)
 export HOME="$TMP/home" DOTLINK_HOME="$TMP/home" DOTLINK_REPO_ROOT="$TMP/repo"
 export XDG_CONFIG_HOME="$TMP/xdg space"
+if [ "$FISH_MAPPING_TEST_MODE" = legacy ]; then
+    python3 - "$TMP/repo/dotlink/modules.conf" <<'PYTEST'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+start = text.index('[module fish]\n')
+end = text.find('[module ', start + 1)
+path.write_text(text[:start] + (text[end:] if end != -1 else ''))
+PYTEST
+fi
 CLI="$TMP/repo/bin/dotlink"
 SRC="$TMP/repo/fish/.config/fish/conf.d/dotfiles.fish"
 TARGET="$XDG_CONFIG_HOME/fish/conf.d/dotfiles.fish"
@@ -59,12 +79,23 @@ for kind in file directory symlink broken; do
     if [ "$kind" = directory ]; then rmdir "$TARGET"; else rm "$TARGET"; fi
  done
 # A later conflict preserves earlier successes and leaves foreign files unchanged.
+cp "$TMP/repo/dotlink/modules.conf" "$TMP/modules.conf"
+if [ "$FISH_MAPPING_TEST_MODE" = explicit ]; then
+    python3 - "$TMP/repo/dotlink/modules.conf" <<'PYTEST'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+block = '[link]\nsource = .config/fish/conf.d/zz-conflict.fish\ntarget = fish/conf.d/zz-conflict.fish\nbase = xdg_config\n\n'
+path.write_text(path.read_text().replace('[module agents]', block + '[module agents]'))
+PYTEST
+fi
 printf '# second\n' > "${SRC%/*}/zz-conflict.fish"
 printf 'foreign\n' > "${TARGET%/*}/zz-conflict.fish"
 expect 1 "dotlink: linked $TARGET -> $SRC"$'\n'"$mixed_summary" "dotlink: conflict: refusing to replace ${TARGET%/*}/zz-conflict.fish"$'\n' "$CLI" link fish
 [ -L "$TARGET" ]
 grep -qx foreign "${TARGET%/*}/zz-conflict.fish"
 rm "${SRC%/*}/zz-conflict.fish" "${TARGET%/*}/zz-conflict.fish"
+cp "$TMP/modules.conf" "$TMP/repo/dotlink/modules.conf"
 # No config.fish, functions or mutable files from the source are selected.
 printf 'ignored\n' > "$TMP/repo/fish/.config/fish/config.fish"
 # Empty and unset XDG both use the isolated HOME.
@@ -78,7 +109,12 @@ for mode in empty unset; do
  done
 # Relative XDG is invalid, never interpreted relative to the working directory.
 export XDG_CONFIG_HOME=relative
-expect 1 "$failed_summary" $'dotlink: XDG_CONFIG_HOME must be an absolute path\n' "$CLI" link fish
+if [ "$FISH_MAPPING_TEST_MODE" = explicit ]; then
+    expected_err=$'dotlink: mapping base must be an absolute path: relative\n'
+else
+    expected_err=$'dotlink: XDG_CONFIG_HOME must be an absolute path\n'
+fi
+expect 1 "$failed_summary" "$expected_err" "$CLI" link fish
 
 # Fish rejects every symbolic-link component before examining or creating targets.
 # This includes valid and broken links at XDG_CONFIG_HOME and below it.
@@ -197,5 +233,4 @@ assert_fish $'preinitialized\n' '' 0 env PATH="$TMP/zoxide-bin" HOME="$TMP/home"
 assert_fish $'absent\n' '' 0 env PATH="$TMP/no-zoxide-bin" HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/xdg space" \
     "$FISH_BIN" -N -c "source '$SRC'; functions -q __zoxide_z; or echo absent"
 
-bash "$ROOT/dotlink/tests/fish-mise.sh"
-printf 'fish tests passed\n'
+printf 'fish %s lifecycle passed\n' "$FISH_MAPPING_TEST_MODE"
