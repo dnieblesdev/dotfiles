@@ -77,6 +77,36 @@ class MappingsTest(unittest.TestCase):
             results.append(run)
         self.assertEqual(results[0], results[1])
 
+    def test_zsh_mapping_matches_legacy_lifecycle(self):
+        original = self.config.read_text()
+        self.assertIn("[module zsh]", original)
+        results = []
+        for config in ("", original):
+            self.config.write_text(config)
+            run = []
+            for args in (("status", "zsh"), ("verify", "zsh"), ("link", "zsh"),
+                         ("link", "zsh"), ("status", "zsh"), ("verify", "zsh"),
+                         ("unlink", "zsh")):
+                result = self.run_cli(*args)
+                run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+            results.append(run)
+        self.assertEqual(results[0], results[1])
+
+    def test_zsh_mapping_matches_legacy_conflict(self):
+        original = self.config.read_text()
+        results = []
+        target = self.home / ".zshrc"
+        target.write_text("personal configuration")
+        for config in ("", original):
+            self.config.write_text(config)
+            run = []
+            for command in ("link", "status", "verify", "unlink"):
+                result = self.run_cli(command, "zsh")
+                run.append((result.returncode, result.stdout, result.stderr, self.snapshot()))
+            results.append(run)
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(target.read_text(), "personal configuration")
+
     def test_new_bash_dotfile_requires_explicit_mapping(self):
         (self.repo / "bash/.new-dotfile").write_text("fixture")
         target = self.home / ".new-dotfile"
