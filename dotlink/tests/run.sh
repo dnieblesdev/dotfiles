@@ -328,6 +328,7 @@ assert_link "$DOTLINK_HOME/.bashrc" "$TMP_REPO/bash/.bashrc"
 assert_missing "$DOTLINK_HOME/.bashrc"
 
 # real_path fallback chain: readlink-only and pure-shell fallbacks.
+tilde='~'
 STUB_DIR="$TMP_ROOT/stubs"
 mkdir -p "$STUB_DIR"
 READLINK_BIN="$(command -v readlink)"
@@ -358,7 +359,7 @@ chmod +x "$STUB_DIR/readlink"
     source "$TMP_REPO/dotlink/dotlink.sh"
     [ "$(real_path "$TMP_REPO/bash/.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
     [ "$(real_path "$TMP_REPO/bash/./.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
-    [ "$(real_path "~/foo")" = "$HOME/foo" ]
+    [ "$(real_path "${tilde}/foo")" = "$HOME/foo" ]
 )
 
 # Mask readlink too to exercise the pure-shell fallback.
@@ -375,7 +376,7 @@ EOF
     source "$TMP_REPO/dotlink/dotlink.sh"
     [ "$(real_path "$TMP_REPO/bash/.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
     [ "$(real_path "$TMP_REPO/bash/./.bashrc")" = "$TMP_REPO/bash/.bashrc" ]
-    [ "$(real_path "~/foo")" = "$HOME/foo" ]
+    [ "$(real_path "${tilde}/foo")" = "$HOME/foo" ]
     [ "$(real_path "foo/bar/../baz")" = "foo/baz" ]
     [ "$(real_path "foo/bar/../baz/qux")" = "foo/baz/qux" ]
     [ "$(real_path ".")" = "." ]
