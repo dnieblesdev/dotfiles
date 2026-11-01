@@ -124,6 +124,8 @@ explicitly maps `bash/.bashrc` to `~/.bashrc`; additional Bash destinations
 require their own mappings. The `git` and `git-win` modules explicitly map
 `git/.gitconfig` to `~/.gitconfig` and `git-win/.gitconfig.win` to
 `~/.gitconfig.win`, respectively. Additional destinations require mappings.
+explicitly maps `bash/.bashrc` to `~/.bashrc`, and `zsh` maps `zsh/.zshrc`
+to `~/.zshrc`; additional Bash or Zsh destinations require their own mappings.
 Other legacy modules continue using discovery until explicitly migrated.
 
 ## Fish: individual snippets
