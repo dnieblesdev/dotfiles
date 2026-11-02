@@ -12,6 +12,8 @@ Use before creating or changing content in the user's Notion. Read-only requests
 - Read the current `Guía de mi Notion` before writing. Keep its organizational rules in Notion, not in this skill.
 - Follow the guide and applicable destination-specific conventions within the user's authorized scope. The guide does not authorize additional changes.
 - Never treat a search or access failure as evidence that the guide does not exist.
+- Do not silently create content in a private draft or another location when the intended destination cannot be used.
+- The guide does not override tool restrictions, authorization requirements, or the user's explicit instructions.
 
 ## Decision Gates
 
@@ -19,6 +21,9 @@ Use before creating or changing content in the user's Notion. Read-only requests
 - **Several plausible guides:** ask which applies.
 - **No guide found after a successful search:** report this; follow the explicit request and existing destination conventions. Ask about consequential ambiguity instead of inventing structure.
 - **Guide inaccessible or retrieval failed:** explain the blocker and pause writes unless the user explicitly authorizes proceeding without it.
+- **Related-content search fails:** explain the blocker; do not assume there are no duplicates or silently change destination.
+- **Destination or intent remains ambiguous:** ask the user before writing.
+- **Tool requires an explicitly named destination or authorization:** explain the restriction and ask for the required decision; do not substitute a private draft or another destination.
 
 ## Execution Steps
 
